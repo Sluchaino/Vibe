@@ -1,0 +1,25 @@
+# Project-only configuration. Models and reasoning inherit from the parent.
+# Verified against Codex CLI 0.162.0-alpha.2; see docs/AGENT_SETUP.md.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+
+[agents.architect]
+description = "Архитектура Vibe, модель данных, API, синхронизация и ADR; сначала предложение для утверждения."
+config_file = "agents/architect.toml"
+
+[agents.backend]
+description = "Backend Vibe: C#, ASP.NET Core, PostgreSQL, EF Core, планирование, синхронизация и тесты."
+config_file = "agents/backend.toml"
+
+[agents.android]
+description = "Android Vibe: Kotlin, Compose, Room, offline-first, синхронизация, таймер и тесты."
+config_file = "agents/android.toml"
+
+[agents.frontend]
+description = "Web Vibe: React, TypeScript, календарь, задачи, статистика, API и тесты."
+config_file = "agents/frontend.toml"
+
+[agents.reviewer]
+description = "Проверка изменений Vibe без записи: логика, архитектура, безопасность, API, БД и тесты."
+config_file = "agents/reviewer.toml"

@@ -1,0 +1,32 @@
+# Local tools and build caches
+.tools/
+.pnpm-store/
+**/node_modules/
+**/bin/
+**/obj/
+web/dist/
+*.log
+
+# Local credentials and IDE state
+.env
+.env.*
+!.env.example
+.vs/
+.idea/
+*.user
+*.suo
+
+# Certificates, private keys and local database backups
+*.pem
+*.key
+*.pfx
+*.p12
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.bak
+
+# Android is a later stage
+**/.gradle/
+**/local.properties

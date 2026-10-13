@@ -1,0 +1,4293 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "Vibe D1 — ручные задачи и Web-календарь",
+    "version": "1.0.0",
+    "description": "Формализация D1-01–05, принятых владельцем 12.10.2026; docs/DECISIONS.md и FIRST_SLICE_PROPOSAL.md. Этот номер — версия документа, маршрут /api/v1 — версия общего API. Только D1: real Identity/cookie/antiforgery, PostgreSQL, manual fixedWork, одно явное Place. JSON camelCase, enum strings, UUID, opaque string versions; unknown mutable fields/query и неподдерживаемые constraints отклоняются. Ownership всегда выводится из authenticated Identity. Domain opId scope = current user. Все ответы no-store. Same-origin HTTPS; auth cookie HttpOnly/Secure/SameSite=Strict. Описание семантики, которую JSON Schema не выражает, обязательно для Backend/Web; contracts/README.md и docs/D1_IMPLEMENTATION_NOTES.md."
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "Один origin Web/API через HTTPS и локальный proxy; порт определяет координатор."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Settings"
+    },
+    {
+      "name": "Categories"
+    },
+    {
+      "name": "Tasks"
+    },
+    {
+      "name": "Calendar"
+    }
+  ],
+  "security": [
+    {
+      "CookieAuth": []
+    }
+  ],
+  "paths": {
+    "/auth/antiforgery": {
+      "get": {
+        "operationId": "getAntiforgery",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Получить токен antiforgery",
+        "description": "Доступно анонимному и вошедшему браузеру. Получить заново после смены identity; no-store. Cookie/token не имеют opId.",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "200": {
+            "description": "Парная cookie и requestToken",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "Set-Cookie": {
+                "$ref": "#/components/headers/SetCookie"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiforgeryResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "requestToken": "opaque-example-token-not-real",
+                      "headerName": "X-CSRF-TOKEN"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Войти локальным Identity-account",
+        "description": "Same-origin HTTPS. Предварительно GET antiforgery. После успешного входа обновить /me, очистить/переключить старый identity cache и получить новый antiforgery token. Login может сменить текущий account; нельзя отправлять его черновики под новой identity. Нет domain opId или replay session cookie.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "userName": "demo-one",
+                    "password": "example-only-not-a-credential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Действующий HttpOnly/Secure/Strict сеанс",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "Set-Cookie": {
+                "$ref": "#/components/headers/SetCookie"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "userId": "70000000-0000-4000-8000-000000000001",
+                      "userName": "demo-one"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Завершить текущий сеанс",
+        "description": "Текущая cookie и antiforgery обязательны. Session cookie истекает. Web очищает данные/черновики identity или сохраняет их только в прежнем scope и снова получает анонимный antiforgery token. Logout не входит в domain opId. Тело отсутствует; непустое тело отклоняется 400 validationFailed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Сеанс завершён",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "Set-Cookie": {
+                "$ref": "#/components/headers/SetCookie"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Прочитать текущую identity",
+        "description": "Не возвращает cookie/token/секреты. При истёкшем сеансе возвращает JSON ProblemDetails 401, без HTML redirect.",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "200": {
+            "description": "Текущий пользователь",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "userId": "70000000-0000-4000-8000-000000000001",
+                      "userName": "demo-one"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "operationId": "getSettings",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Прочитать timezone/неделю/единственное место",
+        "description": "Settings ресурс существует у подготовленного account и имеет ETag даже пока place=null.",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "200": {
+            "description": "Настройки и согласованное planState",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "settings": {
+                        "timezone": "Europe/Moscow",
+                        "weekStartsOn": "monday",
+                        "place": {
+                          "id": "10000000-0000-4000-8000-000000000001",
+                          "name": "Дом",
+                          "serverVersion": "place_a1"
+                        },
+                        "serverVersion": "settings_a2"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateSettings",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Явно задать настройки и одно Place",
+        "description": "Полная правка settings, включая явные id/name места. После первого создания place.id стабилен; замена/удаление/второе Place ->400 unsupportedConstraint. Timezone меняет отображение instants, без сдвига блоков и без переписывания occurrence availability timezone. Settings и Place версии меняются атомарно вместе с planningInputRevision, scheduleVersion не меняется. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "timezone": "Europe/Moscow",
+                    "weekStartsOn": "monday",
+                    "place": {
+                      "id": "10000000-0000-4000-8000-000000000001",
+                      "name": "Дом"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Сохранённые настройки",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "settings": {
+                        "timezone": "Europe/Moscow",
+                        "weekStartsOn": "monday",
+                        "place": {
+                          "id": "10000000-0000-4000-8000-000000000001",
+                          "name": "Дом",
+                          "serverVersion": "place_a1"
+                        },
+                        "serverVersion": "settings_a2"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error428"
+          }
+        }
+      }
+    },
+    "/categories": {
+      "get": {
+        "operationId": "listCategories",
+        "tags": [
+          "Categories"
+        ],
+        "summary": "Прочитать категории",
+        "description": "Пагинация только текущего пользователя. Неизвестный query параметр ->400.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница категорий",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryPage"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [],
+                      "nextCursor": null,
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCategory",
+        "tags": [
+          "Categories"
+        ],
+        "summary": "Создать категорию",
+        "description": "Нет PUT/DELETE категории в D1. Создание категории не меняет planningInputRevision/scheduleVersion: это справочное имя без размещённых входов. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "id": "20000000-0000-4000-8000-000000000001",
+                    "name": "Работа"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Категория создана",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "category": {
+                        "id": "20000000-0000-4000-8000-000000000001",
+                        "name": "Работа",
+                        "serverVersion": "cat_a1"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          }
+        }
+      }
+    },
+    "/task-definitions": {
+      "get": {
+        "operationId": "listDefinitions",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Прочитать definitions",
+        "description": "Пагинация текущего пользователя, UUID ascending. Нет DELETE, patch, recurrence/goals/templates. Неизвестный query параметр ->400.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница definitions",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionPage"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [],
+                      "nextCursor": null,
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDefinition",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Создать definition",
+        "description": "Все D1 constraints обязательны, включая splitAllowed=false/rest=0/явный placeId. Сервер проверяет каждую ссылку и не выводит owner из тела. Создание повышает planningInputRevision, не scheduleVersion. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDefinitionRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "id": "30000000-0000-4000-8000-000000000001",
+                    "title": "Подготовить отчёт",
+                    "description": "Проверить данные и написать выводы",
+                    "categoryId": "20000000-0000-4000-8000-000000000001",
+                    "importance": "high",
+                    "difficulty": "medium",
+                    "executionPriority": 4,
+                    "durationPolicy": {
+                      "mode": "fixedWork",
+                      "requiredWorkMinutes": 90
+                    },
+                    "splitAllowed": false,
+                    "mobilityPolicy": "movable",
+                    "availabilityRules": {
+                      "timezone": "Europe/Moscow",
+                      "windows": [
+                        {
+                          "daysOfWeek": [
+                            "monday",
+                            "tuesday",
+                            "wednesday",
+                            "thursday",
+                            "friday"
+                          ],
+                          "startLocalTime": "18:00",
+                          "endLocalTime": "22:00",
+                          "endDayOffset": 0
+                        }
+                      ],
+                      "dateExceptions": []
+                    },
+                    "placeId": "10000000-0000-4000-8000-000000000001",
+                    "requiredRestMinutes": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Definition создан",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "definition": {
+                        "id": "30000000-0000-4000-8000-000000000001",
+                        "title": "Подготовить отчёт",
+                        "description": "Проверить данные и написать выводы",
+                        "categoryId": "20000000-0000-4000-8000-000000000001",
+                        "importance": "high",
+                        "difficulty": "medium",
+                        "executionPriority": 4,
+                        "durationPolicy": {
+                          "mode": "fixedWork",
+                          "requiredWorkMinutes": 90
+                        },
+                        "splitAllowed": false,
+                        "mobilityPolicy": "movable",
+                        "availabilityRules": {
+                          "timezone": "Europe/Moscow",
+                          "windows": [
+                            {
+                              "daysOfWeek": [
+                                "monday",
+                                "tuesday",
+                                "wednesday",
+                                "thursday",
+                                "friday"
+                              ],
+                              "startLocalTime": "18:00",
+                              "endLocalTime": "22:00",
+                              "endDayOffset": 0
+                            }
+                          ],
+                          "dateExceptions": []
+                        },
+                        "placeId": "10000000-0000-4000-8000-000000000001",
+                        "requiredRestMinutes": 0,
+                        "serverVersion": "def_a1"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          }
+        }
+      }
+    },
+    "/task-definitions/{id}": {
+      "get": {
+        "operationId": "getDefinition",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Прочитать definition",
+        "description": "ETag относится к definition; foreign/missing id одинаково 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Definition и согласованное planState",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "definition": {
+                        "id": "30000000-0000-4000-8000-000000000001",
+                        "title": "Подготовить отчёт",
+                        "description": "Проверить данные и написать выводы",
+                        "categoryId": "20000000-0000-4000-8000-000000000001",
+                        "importance": "high",
+                        "difficulty": "medium",
+                        "executionPriority": 4,
+                        "durationPolicy": {
+                          "mode": "fixedWork",
+                          "requiredWorkMinutes": 90
+                        },
+                        "splitAllowed": false,
+                        "mobilityPolicy": "movable",
+                        "availabilityRules": {
+                          "timezone": "Europe/Moscow",
+                          "windows": [
+                            {
+                              "daysOfWeek": [
+                                "monday",
+                                "tuesday",
+                                "wednesday",
+                                "thursday",
+                                "friday"
+                              ],
+                              "startLocalTime": "18:00",
+                              "endLocalTime": "22:00",
+                              "endDayOffset": 0
+                            }
+                          ],
+                          "dateExceptions": []
+                        },
+                        "placeId": "10000000-0000-4000-8000-000000000001",
+                        "requiredRestMinutes": 0,
+                        "serverVersion": "def_a1"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateDefinition",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Полностью изменить definition",
+        "description": "Один ETag definition, без скрытой правки occurrence snapshots/блоков. Повышает definition.serverVersion и planningInputRevision, не scheduleVersion. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDefinitionRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "title": "Подготовить отчёт",
+                    "description": "Проверить данные и написать выводы",
+                    "categoryId": "20000000-0000-4000-8000-000000000001",
+                    "importance": "high",
+                    "difficulty": "medium",
+                    "executionPriority": 4,
+                    "durationPolicy": {
+                      "mode": "fixedWork",
+                      "requiredWorkMinutes": 90
+                    },
+                    "splitAllowed": false,
+                    "mobilityPolicy": "movable",
+                    "availabilityRules": {
+                      "timezone": "Europe/Moscow",
+                      "windows": [
+                        {
+                          "daysOfWeek": [
+                            "monday",
+                            "tuesday",
+                            "wednesday",
+                            "thursday",
+                            "friday"
+                          ],
+                          "startLocalTime": "18:00",
+                          "endLocalTime": "22:00",
+                          "endDayOffset": 0
+                        }
+                      ],
+                      "dateExceptions": []
+                    },
+                    "placeId": "10000000-0000-4000-8000-000000000001",
+                    "requiredRestMinutes": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Сохранённый definition",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinitionResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "definition": {
+                        "id": "30000000-0000-4000-8000-000000000001",
+                        "title": "Подготовить отчёт",
+                        "description": "Проверить данные и написать выводы",
+                        "categoryId": "20000000-0000-4000-8000-000000000001",
+                        "importance": "high",
+                        "difficulty": "medium",
+                        "executionPriority": 4,
+                        "durationPolicy": {
+                          "mode": "fixedWork",
+                          "requiredWorkMinutes": 90
+                        },
+                        "splitAllowed": false,
+                        "mobilityPolicy": "movable",
+                        "availabilityRules": {
+                          "timezone": "Europe/Moscow",
+                          "windows": [
+                            {
+                              "daysOfWeek": [
+                                "monday",
+                                "tuesday",
+                                "wednesday",
+                                "thursday",
+                                "friday"
+                              ],
+                              "startLocalTime": "18:00",
+                              "endLocalTime": "22:00",
+                              "endDayOffset": 0
+                            }
+                          ],
+                          "dateExceptions": []
+                        },
+                        "placeId": "10000000-0000-4000-8000-000000000001",
+                        "requiredRestMinutes": 0,
+                        "serverVersion": "def_a1"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error428"
+          }
+        }
+      }
+    },
+    "/task-definitions/{id}/occurrences": {
+      "post": {
+        "operationId": "createOccurrence",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Создать ручное occurrence из версии definition",
+        "description": "id в path — definitionId. definitionVersion в теле без кавычек проверяется атомарно; stale ->412 staleDefinition. Текущий constraintsSnapshot копируется сервером, sourceDefinitionVersion сохраняется. Точный duplicate logicalDate разрешён, одинаковый occurrence id — нет. Повышает planningInputRevision, не scheduleVersion. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOccurrenceRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "id": "40000000-0000-4000-8000-000000000001",
+                    "definitionVersion": "def_a1",
+                    "logicalDate": "2026-10-12"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Незапланированное occurrence создано",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 90,
+                        "placementStatus": "unplanned",
+                        "calendarBlock": null,
+                        "serverVersion": "occ_a1"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a4",
+                        "scheduleVersion": "schedule_a0"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          }
+        }
+      }
+    },
+    "/occurrences": {
+      "get": {
+        "operationId": "listOccurrences",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Прочитать occurrences/список незапланированных",
+        "description": "placementStatus=unplanned даёт весь незапланированный объём; logicalDate — метка выполнения, не день размещения. Параметры курсора включают все фильтры. Неизвестные query параметры ->400.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/DefinitionFilter"
+          },
+          {
+            "$ref": "#/components/parameters/DateFrom"
+          },
+          {
+            "$ref": "#/components/parameters/DateTo"
+          },
+          {
+            "$ref": "#/components/parameters/PlacementStatus"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница occurrences",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrencePage"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "items": [],
+                      "nextCursor": null,
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      }
+    },
+    "/occurrences/{id}": {
+      "get": {
+        "operationId": "getOccurrence",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Прочитать occurrence со snapshot и блоком",
+        "description": "ETag occurrence общий для snapshot/его calendar commands; версию блока не использовать как базу команд.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Occurrence и согласованное planState",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 90,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a2"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateOccurrence",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Явно изменить snapshot/logicalDate",
+        "description": "Metadata definition не меняются. При существующем блоке новый snapshot обязан сохранить допустимость и полный elapsed fixedWork, иначе 409 invalidExistingPlacement без изменения состояния. Снятие effectiveFixed через mobilityPolicy требует allowFixedChange=true. Повышает occurrence.serverVersion/planningInputRevision, не scheduleVersion; блок не правится скрыто. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOccurrenceRequest"
+              },
+              "examples": {
+                "example1": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "logicalDate": "2026-10-12",
+                    "constraintsSnapshot": {
+                      "durationPolicy": {
+                        "mode": "fixedWork",
+                        "requiredWorkMinutes": 90
+                      },
+                      "splitAllowed": false,
+                      "mobilityPolicy": "movable",
+                      "availabilityRules": {
+                        "timezone": "Europe/Moscow",
+                        "windows": [
+                          {
+                            "daysOfWeek": [
+                              "monday",
+                              "tuesday",
+                              "wednesday",
+                              "thursday",
+                              "friday"
+                            ],
+                            "startLocalTime": "18:00",
+                            "endLocalTime": "22:00",
+                            "endDayOffset": 0
+                          }
+                        ],
+                        "dateExceptions": []
+                      },
+                      "placeId": "10000000-0000-4000-8000-000000000001",
+                      "requiredRestMinutes": 0
+                    },
+                    "allowFixedChange": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Сохранённое occurrence",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 90,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a2"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error428"
+          }
+        }
+      }
+    },
+    "/calendar": {
+      "get": {
+        "operationId": "getCalendar",
+        "tags": [
+          "Calendar"
+        ],
+        "summary": "Прочитать календарь в instant range",
+        "description": "Полуоткрытый диапазон; возвращаются все пересекающие его блоки без обрезания, также snapshots/metadata и обе revision из согласованного read. Максимум 31 различная локальная дата, интервал которой пересекает [from,to), в settings.timezone. UTC+24h для день/неделя запрещён. Calendar не создаёт Completion и не включает solver.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CalendarFrom"
+          },
+          {
+            "$ref": "#/components/parameters/CalendarTo"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Согласованный календарный снимок",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "from": "2026-10-11T21:00:00Z",
+                      "to": "2026-10-12T21:00:00Z",
+                      "blocks": [
+                        {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        }
+                      ],
+                      "occurrences": [
+                        {
+                          "id": "40000000-0000-4000-8000-000000000001",
+                          "definitionId": "30000000-0000-4000-8000-000000000001",
+                          "logicalDate": "2026-10-12",
+                          "sourceDefinitionVersion": "def_a1",
+                          "constraintsSnapshot": {
+                            "durationPolicy": {
+                              "mode": "fixedWork",
+                              "requiredWorkMinutes": 90
+                            },
+                            "splitAllowed": false,
+                            "mobilityPolicy": "movable",
+                            "availabilityRules": {
+                              "timezone": "Europe/Moscow",
+                              "windows": [
+                                {
+                                  "daysOfWeek": [
+                                    "monday",
+                                    "tuesday",
+                                    "wednesday",
+                                    "thursday",
+                                    "friday"
+                                  ],
+                                  "startLocalTime": "18:00",
+                                  "endLocalTime": "22:00",
+                                  "endDayOffset": 0
+                                }
+                              ],
+                              "dateExceptions": []
+                            },
+                            "placeId": "10000000-0000-4000-8000-000000000001",
+                            "requiredRestMinutes": 0
+                          },
+                          "remainingWorkMinutes": 90,
+                          "placementStatus": "planned",
+                          "calendarBlock": {
+                            "id": "50000000-0000-4000-8000-000000000001",
+                            "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                            "kind": "task",
+                            "startInstant": "2026-10-12T15:00:00Z",
+                            "endInstant": "2026-10-12T16:30:00Z",
+                            "fixed": false,
+                            "serverVersion": "block_a1"
+                          },
+                          "serverVersion": "occ_a2"
+                        }
+                      ],
+                      "definitions": [
+                        {
+                          "id": "30000000-0000-4000-8000-000000000001",
+                          "title": "Подготовить отчёт",
+                          "description": "Проверить данные и написать выводы",
+                          "categoryId": "20000000-0000-4000-8000-000000000001",
+                          "importance": "high",
+                          "difficulty": "medium",
+                          "executionPriority": 4,
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0,
+                          "serverVersion": "def_a1"
+                        }
+                      ],
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/occurrences/{id}/placement": {
+      "post": {
+        "operationId": "changePlacement",
+        "tags": [
+          "Calendar"
+        ],
+        "summary": "Атомарно place/move/unplace/setFixed",
+        "description": "If-Match — версия occurrence. В одном per-user guard/транзакции сначала проверяются entity version (412), затем baseScheduleVersion (409 staleSchedule), constraints/DST/пересечения/fixed confirmation. Все блоки пользователя [start,end) непересекающиеся; касание end=start допустимо. Принятая команда меняет occurrence.serverVersion, созданный/изменённый block.serverVersion и обе plan revision; unplace удаляет только блок. Длина всегда requiredWorkMinutes elapsed UTC minutes, end клиент не передаёт. allowFixedChange=true — ручное подтверждение, не разрешение обходить другие constraints. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlacementCommand"
+              },
+              "examples": {
+                "place": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "action": "place",
+                    "baseScheduleVersion": "schedule_a0",
+                    "allowFixedChange": false,
+                    "localStart": "2026-10-12T18:00:00",
+                    "timezone": "Europe/Moscow",
+                    "utcOffset": "+03:00"
+                  }
+                },
+                "move": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "action": "move",
+                    "baseScheduleVersion": "schedule_a1",
+                    "allowFixedChange": true,
+                    "localStart": "2026-10-12T19:00:00",
+                    "timezone": "Europe/Moscow",
+                    "utcOffset": "+03:00"
+                  }
+                },
+                "unplace": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "action": "unplace",
+                    "baseScheduleVersion": "schedule_a1",
+                    "allowFixedChange": true
+                  }
+                },
+                "setFixed": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000001",
+                    "action": "setFixed",
+                    "baseScheduleVersion": "schedule_a1",
+                    "allowFixedChange": false,
+                    "fixed": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Новый полный occurrence/блок и planState",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceResponse"
+                },
+                "examples": {
+                  "example": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 90,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a2"
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error428"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "CookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-Vibe.Session",
+        "description": "ASP.NET Core Identity cookie, HttpOnly/Secure/SameSite=Strict. JavaScript не читает; same-origin fetch отправляет credentials. Мутации дополнительно требуют X-CSRF-TOKEN, даже login/logout."
+      }
+    },
+    "parameters": {
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ETag"
+        },
+        "description": "Текущий quoted ETag целевой сущности. Для placement — occurrence (не block/schedule); для PUT settings — settings; PUT definitions/occurrences — соответствующий ресурс. Отсутствие ->428 preconditionRequired; несовпадение ->412 staleEntity. Replay того же opId воспроизводит сохранённый результат до новой проверки текущего ETag."
+      },
+      "Antiforgery": {
+        "name": "X-CSRF-TOKEN",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "requestToken из auth/antiforgery для текущей identity + парная Secure cookie. Проверяется на всех изменяющих запросах, включая login/logout и replay. Отсутствие/невалидность ->403 invalidAntiforgery."
+      },
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        },
+        "description": "UUID ресурса текущего пользователя. Чужой/несуществующий id ->404, без раскрытия владельца."
+      },
+      "PageSize": {
+        "name": "pageSize",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        },
+        "description": "Не более 100 объектов на странице. Это защита DTO D1, не SLA."
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/PageCursor"
+        }
+      },
+      "CalendarFrom": {
+        "name": "from",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/UtcInstant"
+        },
+        "description": "Включённая нижняя граница instant-диапазона. UI считает локальное начало дня/недели в settings.timezone."
+      },
+      "CalendarTo": {
+        "name": "to",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/UtcInstant"
+        },
+        "description": "Исключённая верхняя граница. from<to; диапазон пересекает не более 31 локального календарного дня в settings.timezone, границы не вычисляются как UTC+24h."
+      },
+      "DefinitionFilter": {
+        "name": "definitionId",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        },
+        "description": "Фильтр occurrence. Ссылка проверяется на принадлежность; чужая/несуществующая ->404 referenceNotFound."
+      },
+      "DateFrom": {
+        "name": "logicalDateFrom",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/LocalDate"
+        },
+        "description": "Включённый нижний предел ручной logicalDate; независим от instant размещения."
+      },
+      "DateTo": {
+        "name": "logicalDateTo",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/LocalDate"
+        },
+        "description": "Исключённый верхний предел. Если заданы обе границы, from<to."
+      },
+      "PlacementStatus": {
+        "name": "placementStatus",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "unplanned",
+            "planned"
+          ]
+        }
+      }
+    },
+    "headers": {
+      "ETag": {
+        "description": "Сильный quoted ETag ресурса ответа: settings/definition/occurrence/category; в placement — occurrence. Не версия всего envelope.",
+        "schema": {
+          "$ref": "#/components/schemas/ETag"
+        }
+      },
+      "Location": {
+        "description": "Same-origin относительный URL созданного ресурса, без данных другого пользователя.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CacheControl": {
+        "description": "Всегда no-store для auth и личных данных, включая ошибки.",
+        "schema": {
+          "type": "string",
+          "const": "no-store"
+        }
+      },
+      "CorrelationId": {
+        "description": "Идентификатор текущего HTTP-запроса; не хранить секреты или тело запроса в логах.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Replay": {
+        "description": "false при исходном окончательном результате, true при воспроизведении domain opId. Replay сохраняет status/body/ETag/Location исходного результата; этот флаг и correlation текущие.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "SetCookie": {
+        "description": "Браузер управляет cookie. Auth __Host-Vibe.Session и antiforgery __Host-Vibe.Antiforgery: HttpOnly, Secure, SameSite=Strict, Path=/, без Domain. Logout истекает session cookie. Значения не доступны JavaScript и не входят в domain dedup.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "Error400": {
+        "description": "Неверные/неподдерживаемые данные: validationFailed, unsupportedConstraint, outsideAvailability, invalidLocalTime, invalidUtcOffset, ambiguousAvailabilityBoundary, rangeTooLarge, invalidCursor. Неизвестные поля/enum/query не игнорируются. FieldErrors — только безопасные сообщения.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          },
+          "Idempotency-Replayed": {
+            "$ref": "#/components/headers/Replay"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Error401": {
+        "description": "Нет действующего Identity-сеанса: unauthorized. Login возвращает invalidCredentials для неверных данных/lockout, без перечисления accounts.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Error403": {
+        "description": "invalidAntiforgery (включая replay) либо forbidden. Cookie/SameSite не заменяет antiforgery.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Error404": {
+        "description": "notFound для отсутствующей/чужой целевой сущности; referenceNotFound для ссылки. Ответ не раскрывает чужие данные.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          },
+          "Idempotency-Replayed": {
+            "$ref": "#/components/headers/Replay"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Error409": {
+        "description": "idUnavailable, idempotencyMismatch, staleSchedule, fixedChangeRequiresConfirmation, invalidPlacementState, placementConflict, invalidExistingPlacement. currentPlanState/currentOccurrence/conflictingBlockIds только текущего пользователя.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          },
+          "Idempotency-Replayed": {
+            "$ref": "#/components/headers/Replay"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Error412": {
+        "description": "staleEntity для If-Match; staleDefinition для definitionVersion при создании occurrence. currentServerVersion и текущий принадлежащий пользователю ресурс/ETag дают базу ручного разрешения.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          },
+          "Idempotency-Replayed": {
+            "$ref": "#/components/headers/Replay"
+          },
+          "ETag": {
+            "$ref": "#/components/headers/ETag"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "Error428": {
+        "description": "preconditionRequired: отсутствует обязательный If-Match. Новая попытка после добавления условия использует новый opId.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          },
+          "Idempotency-Replayed": {
+            "$ref": "#/components/headers/Replay"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Uuid": {
+        "type": "string",
+        "format": "uuid",
+        "description": "UUID ресурса или opId. UUID не является правом доступа.",
+        "examples": [
+          "30000000-0000-4000-8000-000000000001"
+        ]
+      },
+      "ServerVersion": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "description": "Непрозрачный case-sensitive токен. Не число, не время; клиент проверяет только равенство. ETag — этот токен в двойных кавычках.",
+        "examples": [
+          "def_a1"
+        ]
+      },
+      "ETag": {
+        "type": "string",
+        "pattern": "^\"[A-Za-z0-9_-]+\"$",
+        "description": "Один сильный quoted ETag, например \"occ_a2\". W/, *, список тегов и unquoted token в D1 отклоняются 400.",
+        "examples": [
+          "\"occ_a2\""
+        ]
+      },
+      "IanaTimezone": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "Идентификатор IANA, проверяется сервером по базе зон; Windows timezone ID и неизвестная зона отклоняются. Регулярное выражение не заменяет проверку базы.",
+        "examples": [
+          "Europe/Moscow"
+        ]
+      },
+      "LocalDate": {
+        "type": "string",
+        "format": "date",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "description": "Реальная календарная дата YYYY-MM-DD, не UTC instant.",
+        "examples": [
+          "2026-10-12"
+        ]
+      },
+      "LocalTime": {
+        "type": "string",
+        "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+        "description": "HH:mm, точность до минуты; 24:00 не используется.",
+        "examples": [
+          "18:00"
+        ]
+      },
+      "LocalDateTime": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:00$",
+        "description": "Локальная дата/время без offset и Z, YYYY-MM-DDTHH:mm:00. Сервер проверяет календарную дату, DST и minute precision.",
+        "examples": [
+          "2026-10-12T18:00:00"
+        ]
+      },
+      "UtcInstant": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:00Z$",
+        "description": "UTC instant с Z, без дробной секунды, секунды 00. Полуоткрытые интервалы [start,end).",
+        "examples": [
+          "2026-10-12T15:00:00Z"
+        ]
+      },
+      "UtcOffset": {
+        "type": "string",
+        "pattern": "^[+-](?:0\\d|1[0-4]):[0-5]\\d$",
+        "description": "Явно выбранный offset ±HH:mm; при 14 часах минуты обязаны быть 00. Сервер требует действительного offset зоны на указанное локальное время. -00:00 не допускается.",
+        "examples": [
+          "+03:00"
+        ]
+      },
+      "DayOfWeek": {
+        "type": "string",
+        "enum": [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday",
+          "sunday"
+        ]
+      },
+      "Name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "После проверки пробелов имя не может быть пустым; сервер не молча обрезает значение.",
+        "examples": [
+          "Дом"
+        ]
+      },
+      "FixedWorkDuration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "fixedWork"
+          },
+          "requiredWorkMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "description": "Положительный целый полезный объём; без скрытого min/max/desired. Длина блока равна объёму в elapsed UTC minutes."
+          }
+        },
+        "required": [
+          "mode",
+          "requiredWorkMinutes"
+        ],
+        "examples": [
+          {
+            "mode": "fixedWork",
+            "requiredWorkMinutes": 90
+          }
+        ]
+      },
+      "AvailabilityWindow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "daysOfWeek": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayOfWeek"
+            },
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true
+          },
+          "startLocalTime": {
+            "$ref": "#/components/schemas/LocalTime"
+          },
+          "endLocalTime": {
+            "$ref": "#/components/schemas/LocalTime"
+          },
+          "endDayOffset": {
+            "type": "integer",
+            "format": "int32",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "0 — конец того же дня и start<end; 1 — конец следующего дня, end<=start, длина локального окна ≤24h. 00:00→00:00 +1 обозначает весь день."
+          }
+        },
+        "required": [
+          "daysOfWeek",
+          "startLocalTime",
+          "endLocalTime",
+          "endDayOffset"
+        ]
+      },
+      "ExceptionWindow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "startLocalTime": {
+            "$ref": "#/components/schemas/LocalTime"
+          },
+          "endLocalTime": {
+            "$ref": "#/components/schemas/LocalTime"
+          },
+          "endDayOffset": {
+            "type": "integer",
+            "format": "int32",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "startUtcOffset": {
+            "$ref": "#/components/schemas/UtcOffset"
+          },
+          "endUtcOffset": {
+            "$ref": "#/components/schemas/UtcOffset"
+          }
+        },
+        "required": [
+          "startLocalTime",
+          "endLocalTime",
+          "endDayOffset",
+          "startUtcOffset",
+          "endUtcOffset"
+        ],
+        "description": "Окно на конкретную дату с явным выбором offset обеих границ. Начало localDate+startLocalTime, конец localDate+endDayOffset+endLocalTime. Несуществующая граница всё равно недопустима."
+      },
+      "AvailabilityDateException": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "localDate": {
+            "$ref": "#/components/schemas/LocalDate"
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExceptionWindow"
+            }
+          }
+        },
+        "required": [
+          "localDate",
+          "windows"
+        ],
+        "description": "Заменяет все обычные окна, начинающиеся в localDate. Пустой windows явно запрещает начало окна этой даты. Исключения уникальны по localDate. Ночное окно предыдущей даты остаётся отдельным; чтобы убрать его хвост, изменить исключение предыдущей даты."
+      },
+      "AvailabilityRules": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "timezone": {
+            "$ref": "#/components/schemas/IanaTimezone"
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AvailabilityWindow"
+            }
+          },
+          "dateExceptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AvailabilityDateException"
+            }
+          }
+        },
+        "required": [
+          "timezone",
+          "windows",
+          "dateExceptions"
+        ],
+        "description": "timezone сохраняется в definition/occurrence snapshot. windows=[] означает любые дни/время, кроме dateExceptions. Для выбора только дней указать окна 00:00→00:00 +1. Ночные окна нормализуются в UTC-интервалы; блок полностью помещается в одном разрешённом нормализованном окне. Для неограниченного режима исключение даты заменяет его окно полного дня. Неоднозначная/несуществующая граница обычного окна блокирует размещение через это окно с ambiguousAvailabilityBoundary; нужна dateException с действительными явными границами/offset. Нельзя молча сдвигать DST-gap.",
+        "examples": [
+          {
+            "timezone": "Europe/Moscow",
+            "windows": [
+              {
+                "daysOfWeek": [
+                  "monday",
+                  "tuesday",
+                  "wednesday",
+                  "thursday",
+                  "friday"
+                ],
+                "startLocalTime": "18:00",
+                "endLocalTime": "22:00",
+                "endDayOffset": 0
+              }
+            ],
+            "dateExceptions": []
+          },
+          {
+            "timezone": "Europe/Berlin",
+            "windows": [
+              {
+                "daysOfWeek": [
+                  "sunday"
+                ],
+                "startLocalTime": "02:00",
+                "endLocalTime": "04:00",
+                "endDayOffset": 0
+              }
+            ],
+            "dateExceptions": [
+              {
+                "localDate": "2026-10-25",
+                "windows": [
+                  {
+                    "startLocalTime": "02:00",
+                    "endLocalTime": "04:00",
+                    "endDayOffset": 0,
+                    "startUtcOffset": "+02:00",
+                    "endUtcOffset": "+01:00"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "ConstraintsSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "durationPolicy": {
+            "$ref": "#/components/schemas/FixedWorkDuration"
+          },
+          "splitAllowed": {
+            "type": "boolean",
+            "const": false
+          },
+          "mobilityPolicy": {
+            "type": "string",
+            "enum": [
+              "movable",
+              "fixedAfterPlacement"
+            ]
+          },
+          "availabilityRules": {
+            "$ref": "#/components/schemas/AvailabilityRules"
+          },
+          "placeId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "requiredRestMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "const": 0
+          }
+        },
+        "required": [
+          "durationPolicy",
+          "splitAllowed",
+          "mobilityPolicy",
+          "availabilityRules",
+          "placeId",
+          "requiredRestMinutes"
+        ],
+        "description": "Отдельный сохранённый снимок, не live-ссылка на constraints definition. Новое definition не переписывает существующие occurrence.",
+        "examples": [
+          {
+            "durationPolicy": {
+              "mode": "fixedWork",
+              "requiredWorkMinutes": 90
+            },
+            "splitAllowed": false,
+            "mobilityPolicy": "movable",
+            "availabilityRules": {
+              "timezone": "Europe/Moscow",
+              "windows": [
+                {
+                  "daysOfWeek": [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday"
+                  ],
+                  "startLocalTime": "18:00",
+                  "endLocalTime": "22:00",
+                  "endDayOffset": 0
+                }
+              ],
+              "dateExceptions": []
+            },
+            "placeId": "10000000-0000-4000-8000-000000000001",
+            "requiredRestMinutes": 0
+          }
+        ]
+      },
+      "TaskDefinition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Непустой после проверки пробелов; не обрезается молча."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "light",
+              "medium",
+              "heavy"
+            ]
+          },
+          "executionPriority": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "durationPolicy": {
+            "$ref": "#/components/schemas/FixedWorkDuration"
+          },
+          "splitAllowed": {
+            "type": "boolean",
+            "const": false
+          },
+          "mobilityPolicy": {
+            "type": "string",
+            "enum": [
+              "movable",
+              "fixedAfterPlacement"
+            ]
+          },
+          "availabilityRules": {
+            "$ref": "#/components/schemas/AvailabilityRules"
+          },
+          "placeId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "requiredRestMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "const": 0
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "categoryId",
+          "importance",
+          "difficulty",
+          "executionPriority",
+          "durationPolicy",
+          "splitAllowed",
+          "mobilityPolicy",
+          "availabilityRules",
+          "placeId",
+          "requiredRestMinutes",
+          "serverVersion"
+        ],
+        "examples": [
+          {
+            "id": "30000000-0000-4000-8000-000000000001",
+            "title": "Подготовить отчёт",
+            "description": "Проверить данные и написать выводы",
+            "categoryId": "20000000-0000-4000-8000-000000000001",
+            "importance": "high",
+            "difficulty": "medium",
+            "executionPriority": 4,
+            "durationPolicy": {
+              "mode": "fixedWork",
+              "requiredWorkMinutes": 90
+            },
+            "splitAllowed": false,
+            "mobilityPolicy": "movable",
+            "availabilityRules": {
+              "timezone": "Europe/Moscow",
+              "windows": [
+                {
+                  "daysOfWeek": [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday"
+                  ],
+                  "startLocalTime": "18:00",
+                  "endLocalTime": "22:00",
+                  "endDayOffset": 0
+                }
+              ],
+              "dateExceptions": []
+            },
+            "placeId": "10000000-0000-4000-8000-000000000001",
+            "requiredRestMinutes": 0,
+            "serverVersion": "def_a1"
+          }
+        ]
+      },
+      "CreateDefinitionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Непустой после проверки пробелов; не обрезается молча."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "light",
+              "medium",
+              "heavy"
+            ]
+          },
+          "executionPriority": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "durationPolicy": {
+            "$ref": "#/components/schemas/FixedWorkDuration"
+          },
+          "splitAllowed": {
+            "type": "boolean",
+            "const": false
+          },
+          "mobilityPolicy": {
+            "type": "string",
+            "enum": [
+              "movable",
+              "fixedAfterPlacement"
+            ]
+          },
+          "availabilityRules": {
+            "$ref": "#/components/schemas/AvailabilityRules"
+          },
+          "placeId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "requiredRestMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "const": 0
+          }
+        },
+        "required": [
+          "opId",
+          "id",
+          "title",
+          "description",
+          "categoryId",
+          "importance",
+          "difficulty",
+          "executionPriority",
+          "durationPolicy",
+          "splitAllowed",
+          "mobilityPolicy",
+          "availabilityRules",
+          "placeId",
+          "requiredRestMinutes"
+        ],
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "id": "30000000-0000-4000-8000-000000000001",
+            "title": "Подготовить отчёт",
+            "description": "Проверить данные и написать выводы",
+            "categoryId": "20000000-0000-4000-8000-000000000001",
+            "importance": "high",
+            "difficulty": "medium",
+            "executionPriority": 4,
+            "durationPolicy": {
+              "mode": "fixedWork",
+              "requiredWorkMinutes": 90
+            },
+            "splitAllowed": false,
+            "mobilityPolicy": "movable",
+            "availabilityRules": {
+              "timezone": "Europe/Moscow",
+              "windows": [
+                {
+                  "daysOfWeek": [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday"
+                  ],
+                  "startLocalTime": "18:00",
+                  "endLocalTime": "22:00",
+                  "endDayOffset": 0
+                }
+              ],
+              "dateExceptions": []
+            },
+            "placeId": "10000000-0000-4000-8000-000000000001",
+            "requiredRestMinutes": 0
+          }
+        ]
+      },
+      "UpdateDefinitionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Непустой после проверки пробелов; не обрезается молча."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "categoryId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "importance": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "light",
+              "medium",
+              "heavy"
+            ]
+          },
+          "executionPriority": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "durationPolicy": {
+            "$ref": "#/components/schemas/FixedWorkDuration"
+          },
+          "splitAllowed": {
+            "type": "boolean",
+            "const": false
+          },
+          "mobilityPolicy": {
+            "type": "string",
+            "enum": [
+              "movable",
+              "fixedAfterPlacement"
+            ]
+          },
+          "availabilityRules": {
+            "$ref": "#/components/schemas/AvailabilityRules"
+          },
+          "placeId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "requiredRestMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "const": 0
+          }
+        },
+        "required": [
+          "opId",
+          "title",
+          "description",
+          "categoryId",
+          "importance",
+          "difficulty",
+          "executionPriority",
+          "durationPolicy",
+          "splitAllowed",
+          "mobilityPolicy",
+          "availabilityRules",
+          "placeId",
+          "requiredRestMinutes"
+        ],
+        "description": "Полная правка definition. id/owner/serverVersion в теле запрещены; ETag передаётся If-Match. Существующие occurrence snapshots не меняются.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "title": "Подготовить отчёт",
+            "description": "Проверить данные и написать выводы",
+            "categoryId": "20000000-0000-4000-8000-000000000001",
+            "importance": "high",
+            "difficulty": "medium",
+            "executionPriority": 4,
+            "durationPolicy": {
+              "mode": "fixedWork",
+              "requiredWorkMinutes": 90
+            },
+            "splitAllowed": false,
+            "mobilityPolicy": "movable",
+            "availabilityRules": {
+              "timezone": "Europe/Moscow",
+              "windows": [
+                {
+                  "daysOfWeek": [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday"
+                  ],
+                  "startLocalTime": "18:00",
+                  "endLocalTime": "22:00",
+                  "endDayOffset": 0
+                }
+              ],
+              "dateExceptions": []
+            },
+            "placeId": "10000000-0000-4000-8000-000000000001",
+            "requiredRestMinutes": 0
+          }
+        ]
+      },
+      "Place": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "serverVersion"
+        ],
+        "examples": [
+          {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "name": "Дом",
+            "serverVersion": "place_a1"
+          }
+        ]
+      },
+      "PlaceInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "description": "Пользователь явно создаёт одно место. После создания id стабилен; этот PUT может менять только name. Замена id, удаление/второе место не входит в D1."
+      },
+      "UserSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "timezone": {
+            "$ref": "#/components/schemas/IanaTimezone"
+          },
+          "weekStartsOn": {
+            "type": "string",
+            "const": "monday"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Place"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "timezone",
+          "weekStartsOn",
+          "place",
+          "serverVersion"
+        ],
+        "description": "place=null только до явного первого выбора. Начальные timezone задаются конфигурацией двух локальных accounts; сервер никогда не создаёт фиктивное Place.",
+        "examples": [
+          {
+            "timezone": "Europe/Moscow",
+            "weekStartsOn": "monday",
+            "place": {
+              "id": "10000000-0000-4000-8000-000000000001",
+              "name": "Дом",
+              "serverVersion": "place_a1"
+            },
+            "serverVersion": "settings_a2"
+          }
+        ]
+      },
+      "UpdateSettingsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/IanaTimezone"
+          },
+          "weekStartsOn": {
+            "type": "string",
+            "const": "monday"
+          },
+          "place": {
+            "$ref": "#/components/schemas/PlaceInput"
+          }
+        },
+        "required": [
+          "opId",
+          "timezone",
+          "weekStartsOn",
+          "place"
+        ],
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "timezone": "Europe/Moscow",
+            "weekStartsOn": "monday",
+            "place": {
+              "id": "10000000-0000-4000-8000-000000000001",
+              "name": "Дом"
+            }
+          }
+        ]
+      },
+      "Category": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "serverVersion"
+        ],
+        "examples": [
+          {
+            "id": "20000000-0000-4000-8000-000000000001",
+            "name": "Работа",
+            "serverVersion": "cat_a1"
+          }
+        ]
+      },
+      "CreateCategoryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "opId",
+          "id",
+          "name"
+        ],
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "id": "20000000-0000-4000-8000-000000000001",
+            "name": "Работа"
+          }
+        ]
+      },
+      "CalendarBlock": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "occurrenceId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "task"
+          },
+          "startInstant": {
+            "$ref": "#/components/schemas/UtcInstant"
+          },
+          "endInstant": {
+            "$ref": "#/components/schemas/UtcInstant"
+          },
+          "fixed": {
+            "type": "boolean"
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "occurrenceId",
+          "kind",
+          "startInstant",
+          "endInstant",
+          "fixed",
+          "serverVersion"
+        ],
+        "description": "Ноль или один блок occurrence. UUID выдаёт сервер. fixed — отдельная пользовательская фиксация; effectiveFixed = fixed OR mobilityPolicy=fixedAfterPlacement. Ни блок, ни размещение не являются Completion.",
+        "examples": [
+          {
+            "id": "50000000-0000-4000-8000-000000000001",
+            "occurrenceId": "40000000-0000-4000-8000-000000000001",
+            "kind": "task",
+            "startInstant": "2026-10-12T15:00:00Z",
+            "endInstant": "2026-10-12T16:30:00Z",
+            "fixed": false,
+            "serverVersion": "block_a1"
+          }
+        ]
+      },
+      "TaskOccurrence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "definitionId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "logicalDate": {
+            "$ref": "#/components/schemas/LocalDate"
+          },
+          "sourceDefinitionVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "constraintsSnapshot": {
+            "$ref": "#/components/schemas/ConstraintsSnapshot"
+          },
+          "remainingWorkMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "placementStatus": {
+            "type": "string",
+            "enum": [
+              "unplanned",
+              "planned"
+            ]
+          },
+          "calendarBlock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalendarBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "definitionId",
+          "logicalDate",
+          "sourceDefinitionVersion",
+          "constraintsSnapshot",
+          "remainingWorkMinutes",
+          "placementStatus",
+          "calendarBlock",
+          "serverVersion"
+        ],
+        "description": "sourceDefinitionVersion неизменна после копирования; ручная правка snapshot не притворяется новым копированием definition. logicalDate — ручная метка, не запрещает перенос на другой день. Без Completion remainingWorkMinutes=requiredWorkMinutes; planned iff calendarBlock!=null.",
+        "examples": [
+          {
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionId": "30000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "sourceDefinitionVersion": "def_a1",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "remainingWorkMinutes": 90,
+            "placementStatus": "planned",
+            "calendarBlock": {
+              "id": "50000000-0000-4000-8000-000000000001",
+              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+              "kind": "task",
+              "startInstant": "2026-10-12T15:00:00Z",
+              "endInstant": "2026-10-12T16:30:00Z",
+              "fixed": false,
+              "serverVersion": "block_a1"
+            },
+            "serverVersion": "occ_a2"
+          },
+          {
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionId": "30000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "sourceDefinitionVersion": "def_a1",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "remainingWorkMinutes": 90,
+            "placementStatus": "unplanned",
+            "calendarBlock": null,
+            "serverVersion": "occ_a1"
+          }
+        ]
+      },
+      "CreateOccurrenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "definitionVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "logicalDate": {
+            "$ref": "#/components/schemas/LocalDate"
+          }
+        },
+        "required": [
+          "opId",
+          "id",
+          "definitionVersion",
+          "logicalDate"
+        ],
+        "description": "Сервер атомарно проверяет definitionVersion и копирует constraints; клиент не подменяет snapshot при создании. Два разных id на одну logicalDate допустимы.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionVersion": "def_a1",
+            "logicalDate": "2026-10-12"
+          }
+        ]
+      },
+      "UpdateOccurrenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "logicalDate": {
+            "$ref": "#/components/schemas/LocalDate"
+          },
+          "constraintsSnapshot": {
+            "$ref": "#/components/schemas/ConstraintsSnapshot"
+          },
+          "allowFixedChange": {
+            "type": "boolean",
+            "description": "Явное подтверждение снятия effectiveFixed через изменение mobilityPolicy у размещённого occurrence. false безопасен по умолчанию UI, но поле обязателено."
+          }
+        },
+        "required": [
+          "opId",
+          "logicalDate",
+          "constraintsSnapshot",
+          "allowFixedChange"
+        ],
+        "description": "Не меняет metadata definition, sourceDefinitionVersion или блок. Несовместимые со старым блоком новые duration/availability/place отклоняются 409 invalidExistingPlacement. Сначала явно unplace, затем изменить snapshot.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "allowFixedChange": false
+          }
+        ]
+      },
+      "PlaceCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "baseScheduleVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "allowFixedChange": {
+            "type": "boolean"
+          },
+          "action": {
+            "type": "string",
+            "const": "place"
+          },
+          "localStart": {
+            "$ref": "#/components/schemas/LocalDateTime"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/IanaTimezone"
+          },
+          "utcOffset": {
+            "$ref": "#/components/schemas/UtcOffset"
+          }
+        },
+        "required": [
+          "opId",
+          "baseScheduleVersion",
+          "allowFixedChange",
+          "action",
+          "localStart",
+          "timezone",
+          "utcOffset"
+        ],
+        "description": "Только для occurrence без блока. Создаёт block.fixed=false; fixedAfterPlacement защищает через snapshot. End вычисляется сервером из полного fixedWork.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "action": "place",
+            "baseScheduleVersion": "schedule_a0",
+            "allowFixedChange": false,
+            "localStart": "2026-10-12T18:00:00",
+            "timezone": "Europe/Moscow",
+            "utcOffset": "+03:00"
+          }
+        ]
+      },
+      "MoveCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "baseScheduleVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "allowFixedChange": {
+            "type": "boolean"
+          },
+          "action": {
+            "type": "string",
+            "const": "move"
+          },
+          "localStart": {
+            "$ref": "#/components/schemas/LocalDateTime"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/IanaTimezone"
+          },
+          "utcOffset": {
+            "$ref": "#/components/schemas/UtcOffset"
+          }
+        },
+        "required": [
+          "opId",
+          "baseScheduleVersion",
+          "allowFixedChange",
+          "action",
+          "localStart",
+          "timezone",
+          "utcOffset"
+        ],
+        "description": "Только при существующем блоке. Сохраняет id/fixed, меняет UTC start/end; effectiveFixed требует allowFixedChange=true.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "action": "move",
+            "baseScheduleVersion": "schedule_a1",
+            "allowFixedChange": true,
+            "localStart": "2026-10-12T19:00:00",
+            "timezone": "Europe/Moscow",
+            "utcOffset": "+03:00"
+          }
+        ]
+      },
+      "UnplaceCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "baseScheduleVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "allowFixedChange": {
+            "type": "boolean"
+          },
+          "action": {
+            "type": "string",
+            "const": "unplace"
+          }
+        },
+        "required": [
+          "opId",
+          "baseScheduleVersion",
+          "allowFixedChange",
+          "action"
+        ],
+        "description": "Снимает единственный блок целиком, сохраняет occurrence и весь requiredWork. effectiveFixed требует allowFixedChange=true.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "action": "unplace",
+            "baseScheduleVersion": "schedule_a1",
+            "allowFixedChange": true
+          }
+        ]
+      },
+      "SetFixedCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "baseScheduleVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "allowFixedChange": {
+            "type": "boolean"
+          },
+          "action": {
+            "type": "string",
+            "const": "setFixed"
+          },
+          "fixed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "opId",
+          "baseScheduleVersion",
+          "allowFixedChange",
+          "action",
+          "fixed"
+        ],
+        "description": "Меняет только пользовательский block.fixed. Снятие true→false требует allowFixedChange=true; fixedAfterPlacement не снимается этим флагом. Поля localStart/timezone/utcOffset запрещены.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000001",
+            "action": "setFixed",
+            "baseScheduleVersion": "schedule_a1",
+            "allowFixedChange": false,
+            "fixed": true
+          }
+        ]
+      },
+      "PlacementCommand": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PlaceCommand"
+          },
+          {
+            "$ref": "#/components/schemas/MoveCommand"
+          },
+          {
+            "$ref": "#/components/schemas/UnplaceCommand"
+          },
+          {
+            "$ref": "#/components/schemas/SetFixedCommand"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "action",
+          "mapping": {
+            "place": "#/components/schemas/PlaceCommand",
+            "move": "#/components/schemas/MoveCommand",
+            "unplace": "#/components/schemas/UnplaceCommand",
+            "setFixed": "#/components/schemas/SetFixedCommand"
+          }
+        }
+      },
+      "PlanState": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "planningInputRevision": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "scheduleVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "planningInputRevision",
+          "scheduleVersion"
+        ],
+        "examples": [
+          {
+            "planningInputRevision": "input_a5",
+            "scheduleVersion": "schedule_a1"
+          }
+        ]
+      },
+      "SettingsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/UserSettings"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "settings",
+          "planState"
+        ],
+        "examples": [
+          {
+            "settings": {
+              "timezone": "Europe/Moscow",
+              "weekStartsOn": "monday",
+              "place": {
+                "id": "10000000-0000-4000-8000-000000000001",
+                "name": "Дом",
+                "serverVersion": "place_a1"
+              },
+              "serverVersion": "settings_a2"
+            },
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          }
+        ]
+      },
+      "CategoryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/Category"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "category",
+          "planState"
+        ],
+        "examples": [
+          {
+            "category": {
+              "id": "20000000-0000-4000-8000-000000000001",
+              "name": "Работа",
+              "serverVersion": "cat_a1"
+            },
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          }
+        ]
+      },
+      "DefinitionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/TaskDefinition"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "definition",
+          "planState"
+        ],
+        "examples": [
+          {
+            "definition": {
+              "id": "30000000-0000-4000-8000-000000000001",
+              "title": "Подготовить отчёт",
+              "description": "Проверить данные и написать выводы",
+              "categoryId": "20000000-0000-4000-8000-000000000001",
+              "importance": "high",
+              "difficulty": "medium",
+              "executionPriority": 4,
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0,
+              "serverVersion": "def_a1"
+            },
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          }
+        ]
+      },
+      "OccurrenceResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "occurrence": {
+            "$ref": "#/components/schemas/TaskOccurrence"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "occurrence",
+          "planState"
+        ],
+        "examples": [
+          {
+            "occurrence": {
+              "id": "40000000-0000-4000-8000-000000000001",
+              "definitionId": "30000000-0000-4000-8000-000000000001",
+              "logicalDate": "2026-10-12",
+              "sourceDefinitionVersion": "def_a1",
+              "constraintsSnapshot": {
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0
+              },
+              "remainingWorkMinutes": 90,
+              "placementStatus": "planned",
+              "calendarBlock": {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              },
+              "serverVersion": "occ_a2"
+            },
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          }
+        ]
+      },
+      "PageCursor": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "Непрозрачный серверный continuation token, привязан к identity, виду списка и всем фильтрам. Не syncCursor/версия; неизвестный/повреждённый cursor ->400 invalidCursor."
+      },
+      "CategoryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "planState"
+        ],
+        "description": "Страница в порядке UUID ascending; cursor продолжает после последнего id при неизменных фильтрах. Между страницами данные могут изменяться; это не полный sync snapshot."
+      },
+      "DefinitionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDefinition"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "planState"
+        ],
+        "description": "Страница в порядке UUID ascending; cursor продолжает после последнего id при неизменных фильтрах. Между страницами данные могут изменяться; это не полный sync snapshot."
+      },
+      "OccurrencePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskOccurrence"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "planState"
+        ],
+        "description": "Страница в порядке UUID ascending; cursor продолжает после последнего id при неизменных фильтрах. Между страницами данные могут изменяться; это не полный sync snapshot."
+      },
+      "CalendarResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/UtcInstant"
+          },
+          "to": {
+            "$ref": "#/components/schemas/UtcInstant"
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarBlock"
+            }
+          },
+          "occurrences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskOccurrence"
+            }
+          },
+          "definitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskDefinition"
+            }
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "blocks",
+          "occurrences",
+          "definitions",
+          "planState"
+        ],
+        "description": "Один согласованный read-снимок: блоки где start<to и end>from, без обрезания границ. occurrences/definitions — уникальные принадлежащие пользователю ресурсы для этих блоков. Максимум 31 локальный день в settings.timezone. Пустой диапазон from>=to отклоняется.",
+        "examples": [
+          {
+            "from": "2026-10-11T21:00:00Z",
+            "to": "2026-10-12T21:00:00Z",
+            "blocks": [
+              {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              }
+            ],
+            "occurrences": [
+              {
+                "id": "40000000-0000-4000-8000-000000000001",
+                "definitionId": "30000000-0000-4000-8000-000000000001",
+                "logicalDate": "2026-10-12",
+                "sourceDefinitionVersion": "def_a1",
+                "constraintsSnapshot": {
+                  "durationPolicy": {
+                    "mode": "fixedWork",
+                    "requiredWorkMinutes": 90
+                  },
+                  "splitAllowed": false,
+                  "mobilityPolicy": "movable",
+                  "availabilityRules": {
+                    "timezone": "Europe/Moscow",
+                    "windows": [
+                      {
+                        "daysOfWeek": [
+                          "monday",
+                          "tuesday",
+                          "wednesday",
+                          "thursday",
+                          "friday"
+                        ],
+                        "startLocalTime": "18:00",
+                        "endLocalTime": "22:00",
+                        "endDayOffset": 0
+                      }
+                    ],
+                    "dateExceptions": []
+                  },
+                  "placeId": "10000000-0000-4000-8000-000000000001",
+                  "requiredRestMinutes": 0
+                },
+                "remainingWorkMinutes": 90,
+                "placementStatus": "planned",
+                "calendarBlock": {
+                  "id": "50000000-0000-4000-8000-000000000001",
+                  "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                  "kind": "task",
+                  "startInstant": "2026-10-12T15:00:00Z",
+                  "endInstant": "2026-10-12T16:30:00Z",
+                  "fixed": false,
+                  "serverVersion": "block_a1"
+                },
+                "serverVersion": "occ_a2"
+              }
+            ],
+            "definitions": [
+              {
+                "id": "30000000-0000-4000-8000-000000000001",
+                "title": "Подготовить отчёт",
+                "description": "Проверить данные и написать выводы",
+                "categoryId": "20000000-0000-4000-8000-000000000001",
+                "importance": "high",
+                "difficulty": "medium",
+                "executionPriority": 4,
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0,
+                "serverVersion": "def_a1"
+              }
+            ],
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          }
+        ]
+      },
+      "MeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "userName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "userId",
+          "userName"
+        ],
+        "description": "Identity scope для кэша/черновиков Web; userId серверный, не принимается в доменных командах.",
+        "examples": [
+          {
+            "userId": "70000000-0000-4000-8000-000000000001",
+            "userName": "demo-one"
+          }
+        ]
+      },
+      "AntiforgeryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requestToken": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headerName": {
+            "type": "string",
+            "const": "X-CSRF-TOKEN"
+          }
+        },
+        "required": [
+          "requestToken",
+          "headerName"
+        ],
+        "description": "GET выдаёт requestToken и cookie antiforgery. Получить заново после login/logout/смены identity; не логировать и не класть в persistent общий кэш.",
+        "examples": [
+          {
+            "requestToken": "opaque-example-token-not-real",
+            "headerName": "X-CSRF-TOKEN"
+          }
+        ]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "userName",
+          "password"
+        ],
+        "description": "Только заранее подготовленные локальные accounts. Нет public registration, rememberMe или client userId. Login/logout не входят в domain opId replay.",
+        "examples": [
+          {
+            "userName": "demo-one",
+            "password": "example-only-not-a-credential"
+          }
+        ]
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri-reference"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "validationFailed",
+              "unsupportedConstraint",
+              "invalidAntiforgery",
+              "unauthorized",
+              "forbidden",
+              "notFound",
+              "referenceNotFound",
+              "invalidCredentials",
+              "idUnavailable",
+              "idempotencyMismatch",
+              "staleSchedule",
+              "staleDefinition",
+              "staleEntity",
+              "preconditionRequired",
+              "fixedChangeRequiresConfirmation",
+              "invalidPlacementState",
+              "placementConflict",
+              "outsideAvailability",
+              "invalidLocalTime",
+              "invalidUtcOffset",
+              "ambiguousAvailabilityBoundary",
+              "invalidExistingPlacement",
+              "rangeTooLarge",
+              "invalidCursor"
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fieldErrors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Ключ — путь camelCase, например constraintsSnapshot.durationPolicy.requiredWorkMinutes."
+          },
+          "currentServerVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "currentPlanState": {
+            "$ref": "#/components/schemas/PlanState"
+          },
+          "currentSettings": {
+            "$ref": "#/components/schemas/UserSettings"
+          },
+          "currentDefinition": {
+            "$ref": "#/components/schemas/TaskDefinition"
+          },
+          "currentOccurrence": {
+            "$ref": "#/components/schemas/TaskOccurrence"
+          },
+          "conflictingBlockIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          "validUtcOffsets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UtcOffset"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "correlationId"
+        ],
+        "description": "application/problem+json. Только текущий владелец; 404 не различает чужой/отсутствующий id. Не отражать пароли/токены/личные тексты в detail или логах.",
+        "examples": [
+          {
+            "type": "about:blank",
+            "title": "Расписание изменилось",
+            "status": 409,
+            "detail": "Обновите календарь и повторите действие с новым opId.",
+            "instance": "/api/v1/occurrences/40000000-0000-4000-8000-000000000001/placement",
+            "code": "staleSchedule",
+            "correlationId": "request-example-1",
+            "currentPlanState": {
+              "planningInputRevision": "input_a6",
+              "scheduleVersion": "schedule_a2"
+            }
+          },
+          {
+            "type": "about:blank",
+            "title": "Версия устарела",
+            "status": 412,
+            "detail": "Сохранённая редакция ресурса отличается от If-Match.",
+            "instance": "/api/v1/occurrences/40000000-0000-4000-8000-000000000001",
+            "code": "staleEntity",
+            "correlationId": "request-example-2",
+            "currentServerVersion": "occ_a2",
+            "currentOccurrence": {
+              "id": "40000000-0000-4000-8000-000000000001",
+              "definitionId": "30000000-0000-4000-8000-000000000001",
+              "logicalDate": "2026-10-12",
+              "sourceDefinitionVersion": "def_a1",
+              "constraintsSnapshot": {
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0
+              },
+              "remainingWorkMinutes": 90,
+              "placementStatus": "planned",
+              "calendarBlock": {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              },
+              "serverVersion": "occ_a2"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "x-decisions": [
+    "D1-01",
+    "D1-02",
+    "D1-03",
+    "D1-04",
+    "D1-05"
+  ]
+}
