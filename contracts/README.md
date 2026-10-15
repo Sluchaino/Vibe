@@ -1,8 +1,8 @@
-# Общий контракт D1 + C1
+# Общий контракт D1 + C1 + S1
 
-Статус: D1-01–05 утверждён 12.10.2026; C1-01–05, ревизия 2 с отменой, утверждён 13.10.2026 ответом владельца «Утвердить C1 с отменой и реализовать». Основание — [DECISIONS.md](../docs/DECISIONS.md), [FIRST_SLICE_PROPOSAL.md](../docs/FIRST_SLICE_PROPOSAL.md) и [COMPLETION_SLICE_PROPOSAL.md](../docs/COMPLETION_SLICE_PROPOSAL.md). Остальные DRAFT ADR, Android, solver, таймер и статистика не утверждаются.
+Статус: D1-01–05 утверждён 12.10.2026; C1-01–05, ревизия 2 с отменой, утверждён 13.10.2026 ответом владельца «Утвердить C1 с отменой и реализовать»; S1-01–06 утверждён 15.10.2026: «Утвердить S1 и реализовать (рекомендуется)». Основание — [DECISIONS.md](../docs/DECISIONS.md), [FIRST_SLICE_PROPOSAL.md](../docs/FIRST_SLICE_PROPOSAL.md), [COMPLETION_SLICE_PROPOSAL.md](../docs/COMPLETION_SLICE_PROPOSAL.md) и [SYNC_SLICE_PROPOSAL.md](../docs/SYNC_SLICE_PROPOSAL.md). Остальные DRAFT ADR, Android, solver, таймер и статистика не утверждаются.
 
-[d1.openapi.json](d1.openapi.json) — единственный источник путей, DTO, enum, обязательных полей и примеров. Имя файла сохранено; OpenAPI 3.1.0, `info.version=2.0.0` — новая редакция документа, `/api/v1` — прежняя версия маршрута. [D1_IMPLEMENTATION_NOTES.md](../docs/D1_IMPLEMENTATION_NOTES.md) и [утверждённый C1](../docs/COMPLETION_SLICE_PROPOSAL.md) определяют транзакционные и временные правила, которые не выражаются JSON Schema.
+[d1.openapi.json](d1.openapi.json) — единственный источник путей, DTO, enum, обязательных полей и примеров. Имя файла сохранено; OpenAPI 3.1.0, `info.version=2.1.0` — аддитивная редакция S1, `/api/v1` — прежняя версия маршрута. [D1_IMPLEMENTATION_NOTES.md](../docs/D1_IMPLEMENTATION_NOTES.md), [утверждённый C1](../docs/COMPLETION_SLICE_PROPOSAL.md) и [S1_IMPLEMENTATION_NOTES.md](../docs/S1_IMPLEMENTATION_NOTES.md) определяют транзакционные и временные правила, которые не выражаются JSON Schema.
 
 ## Общие правила
 
@@ -38,6 +38,8 @@
 | POST /occurrences/{id}/placement | PlacementCommand + If-Match → OccurrenceResponse |
 | POST /occurrences/{id}/completion | CompleteOccurrenceRequest + If-Match → 200 OccurrenceResponse |
 | POST /occurrences/{id}/completion/reopen | ReopenOccurrenceRequest + If-Match → 200 OccurrenceResponse |
+| GET /sync/bootstrap | pageSize?, cursor? → BootstrapPage; согласованный временный снимок |
+| GET /sync/changes | cursor, pageSize? → ChangesPage; bounded delta |
 
 Удалений нет; категории только читаются/создаются. Этого пакета достаточно для пути «войти → задать место → создать definition → создать occurrence → разместить → перезагрузить → прочитать сохранённое».
 
@@ -69,9 +71,21 @@ GET occurrences добавляет необязательный completionStatus
 
 Новые поля/remaining=0 изменяют закрытый D1 read-контракт; утверждён совместный переход Backend/Web с reload старых вкладок. Сохранённые OperationResults не переписываются. Для старого occurrence mutation replay спецификация разрешает точную LegacyD1 ветвь только при `Idempotency-Replayed=true`; свежие GET/результаты всегда C1. Отсутствие completion в legacy не означает incomplete. Клиент ACK подтверждает по opId и обязательно перечитывает authoritative occurrence/страницы/calendar, не применяя старое body/ETag/currentOccurrence — в том числе после late reopen A, когда уже создан факт B.
 
+## Синхронизация S1
+
+Добавлены семь schemas: SyncProtocol, SyncItemKind, SyncCursor, SyncItem, BootstrapPage, SyncChange, ChangesPage. SyncItem полностью заменяет settings/category/definition/occurrence существующими C1 DTO; calendarBlock=null удаляет прежний вложенный блок, completion=null снимает active проекцию, не server history. С1 пути/DTO/примеры/replay не меняются, кроме добавления четырёх error codes для новых GET.
+
+Initial pageSize default50, диапазон1–100; continuation наследует размер из защищённого cursor, явный другой размер даёт400. Поэтому SyncPageSize не содержит безусловный schema.default. Bootstrap page/delta purpose раздельны, owner/stream защищены; Int64 sequence остаётся внутри opaque cursor. Старый/утраченный cursor даёт явный400/410, новый snapshot не уничтожает pending.
+
+Bootstrap под общим guard материализует immutable snapshot/head/PlanState и pin; terminal page публикуется целиком. Delta фиксирует horizon H; append>H ждёт следующего прохода. Log/data/result атомарны; category имеет свой sequence без input bump, no-op/replay/ошибки не создают changes. Cleanup: 7 суток, TTL15 минут; snapshot pin защищает floor, delta horizon его не удерживает. Пределы snapshot/account4, items5000/16MiB на снимок, guard/build2/5s; 429/503 syncBootstrapBusy, 409 syncSnapshotTooLarge без partial snapshot. Это выбранные локальные параметры, не SLA.
+
+Confirmed Web shadow/cursor имеет единственного publisher в каждой вкладке, хранится в памяти; reload запускает bootstrap. IndexedDB отдельно сохраняет drafts/одну frozen pending-команду на account/origin с CAS. ACK/старый GET не merge в synced shadow; новые base/action/completionId не подставляются молча. Restore обязательно меняет streamId; любой незавершённый pending, включая acknowledgedRefresh, требует resetReview. OperationResults/Completion history не чистятся. Полная offline outbox, Android и solver остаются за границей S1; подробности и проверки — [S1 notes](../docs/S1_IMPLEMENTATION_NOTES.md).
+
 ## Проверка и изменения
 
-Проверки D1 перечислены в [notes](../docs/D1_IMPLEMENTATION_NOTES.md), C1 — в [утверждённом пакете](../docs/COMPLETION_SLICE_PROPOSAL.md). 13.10.2026 выполнена read-only проверка сохранённого JSON: openapi-spec-validator — PASS; 403 внутренних ссылки, 90 schema/media примеров с jsonschema FormatChecker и 24 отклоняемых C1 случая — PASS. Сверка с прежним D1 подтвердила неизменность четырёх auth/me paths, security schemes, 20 входных/placement/constraints/time схем и точность двух LegacyD1 схем. Итог: 15 paths, 20 operations, 57 schemas.
+Проверки D1 перечислены в [notes](../docs/D1_IMPLEMENTATION_NOTES.md), C1 — в [утверждённом пакете](../docs/COMPLETION_SLICE_PROPOSAL.md), S1 — в [S1 notes](../docs/S1_IMPLEMENTATION_NOTES.md). 13.10.2026 выполнена read-only проверка сохранённого JSON: openapi-spec-validator — PASS; 403 внутренних ссылки, 90 schema/media примеров с jsonschema FormatChecker и 24 отклоняемых C1 случая — PASS. Сверка с прежним D1 подтвердила неизменность четырёх auth/me paths, security schemes, 20 входных/placement/constraints/time схем и точность двух LegacyD1 схем. Итог C1: 15 paths, 20 operations, 57 schemas.
+
+15.10.2026 полный validator координатора для S1 —PASS: 474 ссылки/119 примеров, 17 paths/22 operations/64 schemas; дополнительно68 negative cases —PASS. Структурная сверка architect сохранила все C1 paths и прежние схемы/примеры, кроме добавления4 code enum; новые object DTO/union ветви закрыты. Ограничение дополнительного локального Python checker и незапущенные проверки реализации указаны в S1 notes.
 
 Проверка структуры JSON/ссылок/примеров не доказывает серверную реализацию. В этой контрактной задаче build, HTTP и предметные тесты C1 не запускались. Генератор клиентов/DTO, отдельные сервисы, новые auth flows и расширение общего API этим файлом не выбираются.
 

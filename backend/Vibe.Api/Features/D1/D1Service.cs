@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Vibe.Api.Data;
+using Vibe.Api.Features.Sync;
 
 namespace Vibe.Api.Features.D1;
 
@@ -30,9 +31,9 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
 {
     static readonly string[] ConstraintKeys = ["durationPolicy", "splitAllowed", "mobilityPolicy", "availabilityRules", "placeId", "requiredRestMinutes"];
     static string Owner(HttpContext c) => c.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new DomainError(401, "unauthorized");
-    static JsonObject Plan(PlanRow p) => new() { ["planningInputRevision"] = "input_" + p.InputRevision.ToString("x", CultureInfo.InvariantCulture), ["scheduleVersion"] = "schedule_" + p.ScheduleRevision.ToString("x", CultureInfo.InvariantCulture) };
+    public static JsonObject Plan(PlanRow p) => new() { ["planningInputRevision"] = "input_" + p.InputRevision.ToString("x", CultureInfo.InvariantCulture), ["scheduleVersion"] = "schedule_" + p.ScheduleRevision.ToString("x", CultureInfo.InvariantCulture) };
     public static JsonObject Settings(SettingsRow s) => new() { ["timezone"] = s.Timezone, ["weekStartsOn"] = "monday", ["place"] = s.Place is null ? null : new JsonObject { ["id"] = s.Place.Id.ToString("D"), ["name"] = s.Place.Name, ["serverVersion"] = s.Place.Version }, ["serverVersion"] = s.Version };
-    static JsonObject Category(CategoryRow c) => new() { ["id"] = c.Id.ToString("D"), ["name"] = c.Name, ["serverVersion"] = c.Version };
+    public static JsonObject Category(CategoryRow c) => new() { ["id"] = c.Id.ToString("D"), ["name"] = c.Name, ["serverVersion"] = c.Version };
     public static JsonObject Definition(DefinitionRow d) { var result = Wire.Obj(d.FieldsJson); result["id"] = d.Id.ToString("D"); result["serverVersion"] = d.Version; return result; }
     public static JsonObject Block(BlockRow b) => new() { ["id"] = b.Id.ToString("D"), ["occurrenceId"] = b.OccurrenceId.ToString("D"), ["kind"] = "task", ["startInstant"] = TimeRules.Instant(b.Start), ["endInstant"] = TimeRules.Instant(b.End), ["fixed"] = b.Fixed, ["serverVersion"] = b.Version };
     static CompletionRow? Active(OccurrenceRow o) => o.Completions.SingleOrDefault(c => c.RevokedAtUtc is null);
@@ -148,6 +149,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
             reply = new ApiReply(error.Status, Wire.Json(Wire.Problem(ctx, error)), error.ETag);
         }
         db.Operations.Add(new OperationRow { UserId = owner, OpId = operationId, Fingerprint = fingerprint, Status = reply.Status, Body = reply.Body, ETag = reply.ETag, Location = reply.Location });
+        if (reply.Status < 400) await SyncProjection.Append(db, owner, operationId, plan, clock, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return reply with { Replayed = false };

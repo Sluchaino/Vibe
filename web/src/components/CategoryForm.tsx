@@ -11,5 +11,5 @@ export function CategoryForm({ userId, onSaved }: { userId: string; onSaved: () 
     if (!value.name.trim() || codePointLength(value.name) > 100) { command.setError(new Error('Название категории должно содержать от 1 до 100 символов.')); return }
     await command.submit({ method: 'POST', path: '/categories', body: { id: value.id, name: value.name } })
   }
-  return <form className="compact-form" onSubmit={event => void submit(event)}><fieldset disabled={command.busy || !!command.pending}><Field label="Новая категория"><input required value={value.name} onChange={event => setValue({ ...value, name: event.target.value })} /></Field><SubmitButton busy={command.busy}>Добавить категорию</SubmitButton></fieldset><CommandStatus command={command} /></form>
+  return <form className="compact-form" onSubmit={event => void submit(event)}><fieldset><Field label="Новая категория"><input required value={value.name} onChange={event => setValue({ ...value, name: event.target.value })} /></Field><SubmitButton busy={command.busy} disabled={command.blocked}>Добавить категорию</SubmitButton></fieldset><CommandStatus command={command} /></form>
 }

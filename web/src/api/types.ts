@@ -47,6 +47,10 @@ export interface TaskOccurrence {
 }
 export type TaskOccurrenceLegacyD1 = Omit<TaskOccurrence, 'completionStatus' | 'completion'>
 export interface PlanState { planningInputRevision: Version; scheduleVersion: Version }
+export type SyncItem = { kind: 'settings'; value: UserSettings } | { kind: 'category'; value: Category } | { kind: 'definition'; value: TaskDefinition } | { kind: 'occurrence'; value: TaskOccurrence }
+export interface BootstrapPage { protocol: 's1'; streamId: string; snapshotId: string; expiresAt: string; asOfCursor: string; planState: PlanState; items: SyncItem[]; nextPageCursor: string | null }
+export interface SyncChange { id: string; opId: string; item: SyncItem; planState: PlanState }
+export interface ChangesPage { protocol: 's1'; streamId: string; changes: SyncChange[]; nextCursor: string; hasMore: boolean }
 export interface SettingsResponse { settings: UserSettings; planState: PlanState }
 export interface DefinitionResponse { definition: TaskDefinition; planState: PlanState }
 export interface CategoryResponse { category: Category; planState: PlanState }

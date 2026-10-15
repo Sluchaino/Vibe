@@ -25,13 +25,15 @@ public sealed class TestClock : TimeProvider
     }
     public void Reset() { Interlocked.Exchange(ref ticks, 0); Volatile.Write(ref fixedClock, 0); }
 }
-public sealed class TestApp(string connection, TestClock clock) : WebApplicationFactory<Program>
+public sealed class TestApp(string connection, TestClock clock, IReadOnlyDictionary<string, string?>? overrides = null) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        builder.ConfigureAppConfiguration((_, config) =>
         {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
             ["ConnectionStrings:Vibe"] = connection,
             ["Testing:SeedUsers:0:UserName"] = "anna",
             ["Testing:SeedUsers:0:Password"] = PostgresFixture.Password,
@@ -40,7 +42,9 @@ public sealed class TestApp(string connection, TestClock clock) : WebApplication
             ["Testing:SeedUsers:2:UserName"] = "lockout-user",
             ["Testing:SeedUsers:2:Password"] = PostgresFixture.Password,
             ["Auth:SessionHours"] = "24", ["Auth:MaxFailedAccessAttempts"] = "5", ["Auth:LockoutMinutes"] = "15"
-        }));
+            });
+            if (overrides is not null) config.AddInMemoryCollection(overrides);
+        });
         builder.ConfigureServices(s =>
         {
             s.AddSingleton<TimeProvider>(clock);

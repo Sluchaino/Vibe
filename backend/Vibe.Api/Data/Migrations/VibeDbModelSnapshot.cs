@@ -411,6 +411,138 @@ namespace Vibe.Api.Data.Migrations
                     b.ToTable("UserSettings", (string)null);
                 });
 
+            modelBuilder.Entity("Vibe.Api.Data.SyncChangeRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("StreamId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("ChangeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ItemJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("OpId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PlanStateJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId", "StreamId", "Sequence");
+
+                    b.HasIndex("UserId", "OpId");
+
+                    b.HasIndex("UserId", "StreamId", "ChangeId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "StreamId", "OpId")
+                        .IsUnique();
+
+                    b.ToTable("SyncChanges", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SyncChange_PositiveSequence", "\"Sequence\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncSnapshotItemRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SnapshotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ItemJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("UserId", "SnapshotId", "Ordinal");
+
+                    b.ToTable("SyncSnapshotItems", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SyncSnapshotItem_Ordinal", "\"Ordinal\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncSnapshotRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AsOfCursor")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PageSize")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PlanStateJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("StreamId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("WatermarkSequence")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("UserId", "Id");
+
+                    b.HasIndex("UserId", "StreamId");
+
+                    b.HasIndex("UserId", "ExpiresAtUtc", "WatermarkSequence");
+
+                    b.ToTable("SyncSnapshots", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SyncSnapshot_Range", "\"WatermarkSequence\" >= 0 AND \"PageSize\" BETWEEN 1 AND 100 AND \"ExpiresAtUtc\" > \"CreatedAtUtc\"");
+                        });
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncStreamRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<long>("LastSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PrunedThrough")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("StreamId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("SyncStreams", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SyncStream_Range", "\"LastSequence\" >= 0 AND \"PrunedThrough\" >= 0 AND \"PrunedThrough\" <= \"LastSequence\"");
+                        });
+                });
+
             modelBuilder.Entity("Vibe.Api.Data.VibeUser", b =>
                 {
                     b.Property<string>("Id")
@@ -614,6 +746,50 @@ namespace Vibe.Api.Data.Migrations
                     b.HasOne("Vibe.Api.Data.VibeUser", null)
                         .WithOne()
                         .HasForeignKey("Vibe.Api.Data.SettingsRow", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncChangeRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.OperationRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "OpId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vibe.Api.Data.SyncStreamRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "StreamId")
+                        .HasPrincipalKey("UserId", "StreamId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncSnapshotItemRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.SyncSnapshotRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "SnapshotId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncSnapshotRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.SyncStreamRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "StreamId")
+                        .HasPrincipalKey("UserId", "StreamId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.SyncStreamRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.VibeUser", null)
+                        .WithOne()
+                        .HasForeignKey("Vibe.Api.Data.SyncStreamRow", "UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

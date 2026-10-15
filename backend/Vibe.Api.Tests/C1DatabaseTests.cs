@@ -27,7 +27,7 @@ public class C1DatabaseTests(PostgresFixture fixture) : IClassFixture<PostgresFi
         }
         return values;
     }
-    static async Task<(string Owner, Guid Occurrence)> SeedD1(VibeDb db)
+    internal static async Task<(string Owner, Guid Occurrence)> SeedD1(VibeDb db)
     {
         string owner = Guid.NewGuid().ToString("D"); Guid place = Guid.NewGuid(), category = Guid.NewGuid(), definition = Guid.NewGuid(), occurrence = Guid.NewGuid();
         db.Users.Add(new VibeUser { Id = owner, UserName = "migration-test", NormalizedUserName = "MIGRATION-TEST" }); await db.SaveChangesAsync();

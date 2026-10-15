@@ -194,6 +194,8 @@ public partial class ApiIntegrationTests
             await db.SaveChangesAsync();
         }
         var completed = await C1Response(await C1Complete(client, original)); var counters = await C1Counters(client, completed);
+        long syncHead;
+        using (var headScope = C1Fixture.App.Services.CreateScope()) syncHead = (await headScope.ServiceProvider.GetRequiredService<VibeDb>().SyncStreams.AsNoTracking().SingleAsync(s => s.UserId == owner)).LastSequence;
         var success = await Send(client, HttpMethod.Put, C1Path(original), successPayload, oldEtag);
         Assert.Equal(HttpStatusCode.OK, success.StatusCode); Assert.Equal(legacyBody, await success.Content.ReadAsStringAsync()); Assert.Equal("\"legacy_occurrence_v1\"", success.Headers.ETag!.ToString()); Assert.Equal(C1Path(original), success.Headers.Location!.ToString()); Assert.Equal("true", success.Headers.GetValues("Idempotency-Replayed").Single());
         Wire.Validate(Wire.Obj(await success.Content.ReadAsStringAsync()), "OccurrenceMutationResponse");
@@ -204,5 +206,7 @@ public partial class ApiIntegrationTests
         var successId = Guid.Parse(Wire.Str(successPayload, "opId")); var errorId = Guid.Parse(Wire.Str(errorPayload, "opId"));
         Assert.Equal(legacyBody, (await verify.Operations.AsNoTracking().SingleAsync(o => o.UserId == owner && o.OpId == successId)).Body);
         Assert.Equal(oldErrorBody, (await verify.Operations.AsNoTracking().SingleAsync(o => o.UserId == owner && o.OpId == errorId)).Body);
+        Assert.Equal(syncHead, (await verify.SyncStreams.AsNoTracking().SingleAsync(s => s.UserId == owner)).LastSequence);
+        Assert.False(await verify.SyncChanges.AnyAsync(c => c.UserId == owner && (c.OpId == successId || c.OpId == errorId)));
     }
 }

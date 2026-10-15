@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
-    "title": "Vibe D1 + C1 — ручные задачи, календарь и обратимое завершение",
-    "version": "2.0.0",
-    "description": "Формализация D1-01–05, принятых владельцем 12.10.2026; docs/DECISIONS.md и FIRST_SLICE_PROPOSAL.md. Этот номер — версия документа, маршрут /api/v1 — версия общего API. Только D1: real Identity/cookie/antiforgery, PostgreSQL, manual fixedWork, одно явное Place. JSON camelCase, enum strings, UUID, opaque string versions; unknown mutable fields/query и неподдерживаемые constraints отклоняются. Ownership всегда выводится из authenticated Identity. Domain opId scope = current user. Все ответы no-store. Same-origin HTTPS; auth cookie HttpOnly/Secure/SameSite=Strict. Описание семантики, которую JSON Schema не выражает, обязательно для Backend/Web; contracts/README.md и docs/D1_IMPLEMENTATION_NOTES.md. C1 ревизия 2/C1-01–05 принята владельцем 13.10.2026: «Утвердить C1 с отменой и реализовать», docs/DECISIONS.md и COMPLETION_SLICE_PROPOSAL.md. Это согласованная новая закрытая occurrence форма на /api/v1 для совместно обновляемого Backend/Web; legacy client compatibility не заявляется. Старые operation results immutable и могут replay в точной LegacyD1 форме только при Idempotency-Replayed=true. Один active факт, revoked история/context сохраняются; ручные отметки не выдумывают useful work. Остальные auth/D1 правила не меняются."
+    "title": "Vibe D1 + C1 + S1 — задачи, календарь, завершение и синхронизация",
+    "version": "2.1.0",
+    "description": "Формализация D1-01–05, принятых владельцем 12.10.2026; docs/DECISIONS.md и FIRST_SLICE_PROPOSAL.md. Этот номер — версия документа, маршрут /api/v1 — версия общего API. Только D1: real Identity/cookie/antiforgery, PostgreSQL, manual fixedWork, одно явное Place. JSON camelCase, enum strings, UUID, opaque string versions; unknown mutable fields/query и неподдерживаемые constraints отклоняются. Ownership всегда выводится из authenticated Identity. Domain opId scope = current user. Все ответы no-store. Same-origin HTTPS; auth cookie HttpOnly/Secure/SameSite=Strict. Описание семантики, которую JSON Schema не выражает, обязательно для Backend/Web; contracts/README.md и docs/D1_IMPLEMENTATION_NOTES.md. C1 ревизия 2/C1-01–05 принята владельцем 13.10.2026: «Утвердить C1 с отменой и реализовать», docs/DECISIONS.md и COMPLETION_SLICE_PROPOSAL.md. Это согласованная новая закрытая occurrence форма на /api/v1 для совместно обновляемого Backend/Web; legacy client compatibility не заявляется. Старые operation results immutable и могут replay в точной LegacyD1 форме только при Idempotency-Replayed=true. Один active факт, revoked история/context сохраняются; ручные отметки не выдумывают useful work. Остальные auth/D1 правила не меняются. S1-01–06 принят 15.10.2026: «Утвердить S1 и реализовать (рекомендуется)», docs/DECISIONS.md и SYNC_SLICE_PROPOSAL.md. Добавлены только два GET sync, закрытые DTO и новые error codes. Предметные C1 paths/DTO/legacy replay неизменны. Полные wire/transaction/cleanup/restore правила —docs/S1_IMPLEMENTATION_NOTES.md; full offline outbox/Android/solver не входят."
   },
   "servers": [
     {
@@ -27,6 +27,9 @@
     },
     {
       "name": "Calendar"
+    },
+    {
+      "name": "Sync"
     }
   ],
   "security": [
@@ -2326,6 +2329,358 @@
           }
         }
       }
+    },
+    "/sync/bootstrap": {
+      "get": {
+        "operationId": "getSyncBootstrap",
+        "tags": [
+          "Sync"
+        ],
+        "summary": "Получить страницу согласованного полного S1 снимка",
+        "description": "Только GET с cookie identity, без тела/opId/If-Match/CSRF. Query только cursor/pageSize, duplicate/unknown отклоняются. Initial GET под тем же UserPlanState guard materializes snapshot/head W/PlanState и pin W в одной transaction; страницы читают immutable projection, не live rows. Нет transaction между HTTP-запросами. Переиспользовать unexpired same stream/head/pageSize без продления TTL; иначе cap4 snapshots/account, max5000items/16MiB JSON payload, guard2s/build5s, atomic rollback при превышении. TTL15min; bootstrap/cursor не меняют domain/PlanState/log/OperationResults. Страницы стабильны, settings один во всём снимке, порядок settings/category/definition/occurrence и ordinal UUID. После nextPageCursor=null publish staging целиком, затем delta asOfCursor после W. Unknown protocol/kind/fields stops apply. Подробности docs/S1_IMPLEMENTATION_NOTES.md.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SyncBootstrapCursor"
+          },
+          {
+            "$ref": "#/components/parameters/SyncPageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Одна страница того же materialized snapshot. Примеры first/last —один snapshot с pageSize=2; cursor иллюстративны, не действующие подписи.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapPage"
+                },
+                "examples": {
+                  "firstPage": {
+                    "value": {
+                      "protocol": "s1",
+                      "streamId": "80000000-0000-4000-8000-000000000001",
+                      "snapshotId": "81000000-0000-4000-8000-000000000001",
+                      "expiresAt": "2026-10-15T12:15:00.000Z",
+                      "asOfCursor": "opaque-s1-delta-after-snapshot",
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      },
+                      "items": [
+                        {
+                          "kind": "settings",
+                          "value": {
+                            "timezone": "Europe/Moscow",
+                            "weekStartsOn": "monday",
+                            "place": {
+                              "id": "10000000-0000-4000-8000-000000000001",
+                              "name": "Дом",
+                              "serverVersion": "place_a1"
+                            },
+                            "serverVersion": "settings_a2"
+                          }
+                        },
+                        {
+                          "kind": "category",
+                          "value": {
+                            "id": "20000000-0000-4000-8000-000000000001",
+                            "name": "Работа",
+                            "serverVersion": "cat_a1"
+                          }
+                        }
+                      ],
+                      "nextPageCursor": "opaque-s1-bootstrap-page-2"
+                    }
+                  },
+                  "lastPage": {
+                    "value": {
+                      "protocol": "s1",
+                      "streamId": "80000000-0000-4000-8000-000000000001",
+                      "snapshotId": "81000000-0000-4000-8000-000000000001",
+                      "expiresAt": "2026-10-15T12:15:00.000Z",
+                      "asOfCursor": "opaque-s1-delta-after-snapshot",
+                      "planState": {
+                        "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      },
+                      "items": [
+                        {
+                          "kind": "definition",
+                          "value": {
+                            "id": "30000000-0000-4000-8000-000000000001",
+                            "title": "Подготовить отчёт",
+                            "description": "Проверить данные и написать выводы",
+                            "categoryId": "20000000-0000-4000-8000-000000000001",
+                            "importance": "high",
+                            "difficulty": "medium",
+                            "executionPriority": 4,
+                            "durationPolicy": {
+                              "mode": "fixedWork",
+                              "requiredWorkMinutes": 90
+                            },
+                            "splitAllowed": false,
+                            "mobilityPolicy": "movable",
+                            "availabilityRules": {
+                              "timezone": "Europe/Moscow",
+                              "windows": [
+                                {
+                                  "daysOfWeek": [
+                                    "monday",
+                                    "tuesday",
+                                    "wednesday",
+                                    "thursday",
+                                    "friday"
+                                  ],
+                                  "startLocalTime": "18:00",
+                                  "endLocalTime": "22:00",
+                                  "endDayOffset": 0
+                                }
+                              ],
+                              "dateExceptions": []
+                            },
+                            "placeId": "10000000-0000-4000-8000-000000000001",
+                            "requiredRestMinutes": 0,
+                            "serverVersion": "def_a1"
+                          }
+                        },
+                        {
+                          "kind": "occurrence",
+                          "value": {
+                            "id": "40000000-0000-4000-8000-000000000001",
+                            "definitionId": "30000000-0000-4000-8000-000000000001",
+                            "logicalDate": "2026-10-12",
+                            "sourceDefinitionVersion": "def_a1",
+                            "constraintsSnapshot": {
+                              "durationPolicy": {
+                                "mode": "fixedWork",
+                                "requiredWorkMinutes": 90
+                              },
+                              "splitAllowed": false,
+                              "mobilityPolicy": "movable",
+                              "availabilityRules": {
+                                "timezone": "Europe/Moscow",
+                                "windows": [
+                                  {
+                                    "daysOfWeek": [
+                                      "monday",
+                                      "tuesday",
+                                      "wednesday",
+                                      "thursday",
+                                      "friday"
+                                    ],
+                                    "startLocalTime": "18:00",
+                                    "endLocalTime": "22:00",
+                                    "endDayOffset": 0
+                                  }
+                                ],
+                                "dateExceptions": []
+                              },
+                              "placeId": "10000000-0000-4000-8000-000000000001",
+                              "requiredRestMinutes": 0
+                            },
+                            "remainingWorkMinutes": 90,
+                            "placementStatus": "planned",
+                            "calendarBlock": {
+                              "id": "50000000-0000-4000-8000-000000000001",
+                              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                              "kind": "task",
+                              "startInstant": "2026-10-12T15:00:00Z",
+                              "endInstant": "2026-10-12T16:30:00Z",
+                              "fixed": false,
+                              "serverVersion": "block_a1"
+                            },
+                            "serverVersion": "occ_a2",
+                            "completionStatus": "incomplete",
+                            "completion": null
+                          }
+                        }
+                      ],
+                      "nextPageCursor": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SyncError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/SyncError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/SyncError403"
+          },
+          "409": {
+            "$ref": "#/components/responses/SyncSnapshotTooLarge"
+          },
+          "410": {
+            "$ref": "#/components/responses/SyncSnapshotExpired"
+          },
+          "429": {
+            "$ref": "#/components/responses/SyncBootstrapBusy"
+          },
+          "503": {
+            "$ref": "#/components/responses/SyncBootstrapUnavailable"
+          }
+        }
+      }
+    },
+    "/sync/changes": {
+      "get": {
+        "operationId": "getSyncChanges",
+        "tags": [
+          "Sync"
+        ],
+        "summary": "Получить следующую страницу S1 изменений",
+        "description": "Только GET с актуальной cookie identity, без тела/opId/If-Match/CSRF. Обязателен delta cursor; разрешены только cursor/pageSize. Начальный tail фиксирует H=head; continuation сохраняет H/pageSize, append>H ждёт следующего прохода. Чтение stream/floor/immutable log в одной consistent transaction. after A>=PrunedThrough; A=P допустим, A<P ->410. Непредставимые/отрицательные позиции/A>H ->400; подлинный current-stream A>head/H>head ->410, без backward cursor/пустого успеха. Страница/nextCursor применяются вместе одной memory generation. Horizon не pin: cleanup между страницами может потребовать410/resync. Sequence отдельный от input revision; createCategory журналируется без input bump. No-op/replay/domain error не создают changes. Полные occurrence replacement удаляют старый block при null; Completion history/context остаются на сервере. Int64 только внутри защищённого cursor. Legacy ACK никогда не merge; source of truth только sync publisher. Подробности docs/S1_IMPLEMENTATION_NOTES.md.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SyncDeltaCursor"
+          },
+          {
+            "$ref": "#/components/parameters/SyncPageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded page и nextCursor после применённых изменений. continuation/terminal —один проход pageSize=1; terminal idleness сохраняет позицию.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangesPage"
+                },
+                "examples": {
+                  "continuation": {
+                    "value": {
+                      "protocol": "s1",
+                      "streamId": "80000000-0000-4000-8000-000000000001",
+                      "changes": [
+                        {
+                          "id": "82000000-0000-4000-8000-000000000001",
+                          "opId": "60000000-0000-4000-8000-000000000030",
+                          "item": {
+                            "kind": "occurrence",
+                            "value": {
+                              "id": "40000000-0000-4000-8000-000000000001",
+                              "definitionId": "30000000-0000-4000-8000-000000000001",
+                              "logicalDate": "2026-10-12",
+                              "sourceDefinitionVersion": "def_a1",
+                              "constraintsSnapshot": {
+                                "durationPolicy": {
+                                  "mode": "fixedWork",
+                                  "requiredWorkMinutes": 90
+                                },
+                                "splitAllowed": false,
+                                "mobilityPolicy": "movable",
+                                "availabilityRules": {
+                                  "timezone": "Europe/Moscow",
+                                  "windows": [
+                                    {
+                                      "daysOfWeek": [
+                                        "monday",
+                                        "tuesday",
+                                        "wednesday",
+                                        "thursday",
+                                        "friday"
+                                      ],
+                                      "startLocalTime": "18:00",
+                                      "endLocalTime": "22:00",
+                                      "endDayOffset": 0
+                                    }
+                                  ],
+                                  "dateExceptions": []
+                                },
+                                "placeId": "10000000-0000-4000-8000-000000000001",
+                                "requiredRestMinutes": 0
+                              },
+                              "remainingWorkMinutes": 90,
+                              "placementStatus": "unplanned",
+                              "calendarBlock": null,
+                              "serverVersion": "occ_s1_unplaced",
+                              "completionStatus": "incomplete",
+                              "completion": null
+                            }
+                          },
+                          "planState": {
+                            "planningInputRevision": "input_s1_6",
+                            "scheduleVersion": "schedule_s1_2"
+                          }
+                        }
+                      ],
+                      "nextCursor": "opaque-s1-delta-continuation-fixed-horizon",
+                      "hasMore": true
+                    }
+                  },
+                  "terminal": {
+                    "value": {
+                      "protocol": "s1",
+                      "streamId": "80000000-0000-4000-8000-000000000001",
+                      "changes": [
+                        {
+                          "id": "82000000-0000-4000-8000-000000000002",
+                          "opId": "60000000-0000-4000-8000-000000000031",
+                          "item": {
+                            "kind": "category",
+                            "value": {
+                              "id": "20000000-0000-4000-8000-000000000002",
+                              "name": "Личное",
+                              "serverVersion": "cat_s1_2"
+                            }
+                          },
+                          "planState": {
+                            "planningInputRevision": "input_s1_6",
+                            "scheduleVersion": "schedule_s1_2"
+                          }
+                        }
+                      ],
+                      "nextCursor": "opaque-s1-delta-tail-after-horizon",
+                      "hasMore": false
+                    }
+                  },
+                  "idle": {
+                    "value": {
+                      "protocol": "s1",
+                      "streamId": "80000000-0000-4000-8000-000000000001",
+                      "changes": [],
+                      "nextCursor": "opaque-s1-delta-tail-after-horizon",
+                      "hasMore": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SyncError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/SyncError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/SyncError403"
+          },
+          "410": {
+            "$ref": "#/components/responses/SyncResetRequired"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2456,6 +2811,36 @@
           ]
         },
         "description": "Фильтр текущего active факта (не число исторических отметок). Отсутствие —все. Применяется в SQL до OrderBy/Take; входит в identity/kind/filter scope cursor. Смена фильтра требует новой первой страницы."
+      },
+      "SyncPageSize": {
+        "name": "pageSize",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "description": "Начало bootstrap или tail delta без bound: default50. Продолжение bootstrap/bounded delta: отсутствие наследует подписанный размер; явное значение обязано совпасть, иначе400 invalidCursor. Намеренно нет schema.default, чтобы не подставить50 вместо наследуемого размера. Неверное/non-integral/вне1..100 значение ->400 validationFailed."
+      },
+      "SyncBootstrapCursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/SyncCursor"
+        },
+        "description": "Отсутствует у начального GET; иначе bootstrap page cursor конкретного snapshot/next ordinal/pageSize. Пустой/слишком длинный/чужой/невалидный/другой purpose ->400 invalidCursor. Правильно подписанный cursor утраченного/истёкшего snapshot ->410 snapshotExpired."
+      },
+      "SyncDeltaCursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SyncCursor"
+        },
+        "description": "asOfCursor снимка или nextCursor delta. Отсутствие ->400 validationFailed; пустой/слишком длинный/чужой/невалидный/другой purpose ->400 invalidCursor. Отрицательные/непредставимые позиции/A>H ->400 invalidCursor. Аутентичный старый stream, after<floor либо A>head/H>head текущего stream ->410 syncResetRequired без nextCursor."
       }
     },
     "headers": {
@@ -2638,6 +3023,424 @@
           "application/problem+json": {
             "schema": {
               "$ref": "#/components/schemas/ProblemDetails"
+            }
+          }
+        }
+      },
+      "SyncError400": {
+        "description": "Закрытый query/GET без тела. Отсутствующий required delta cursor или неверный pageSize/unknown/duplicate query ->validationFailed. Неаутентичный/чужой/purpose mismatch/недопустимые позиции cursor ->invalidCursor; причина не раскрывает чужие данные.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 400
+                    },
+                    "code": {
+                      "enum": [
+                        "validationFailed",
+                        "invalidCursor"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "invalidCursor": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 400,
+                  "detail": "Cursor не соответствует этому запросу.",
+                  "instance": "/api/v1/sync/changes",
+                  "code": "invalidCursor",
+                  "correlationId": "request-example-s1-400-invalidCursor"
+                }
+              },
+              "invalidQuery": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 400,
+                  "detail": "Разрешены только cursor и pageSize.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "validationFailed",
+                  "correlationId": "request-example-s1-400-validationFailed"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncError401": {
+        "description": "Актуальная Identity обязательна на каждом запросе. Private cache не публикуется другому account.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 401
+                    },
+                    "code": {
+                      "enum": [
+                        "unauthorized"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "unauthorized": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 401,
+                  "detail": "Войдите в исходный аккаунт.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "unauthorized",
+                  "correlationId": "request-example-s1-401-unauthorized"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncError403": {
+        "description": "Отказ общего доступа к ресурсу; GET не требует antiforgery, новый auth protocol не вводится.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 403
+                    },
+                    "code": {
+                      "enum": [
+                        "forbidden"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "forbidden": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 403,
+                  "detail": "Доступ запрещён.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "forbidden",
+                  "correlationId": "request-example-s1-403-forbidden"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncSnapshotTooLarge": {
+        "description": "Bootstrap превысил5000 SyncItem или16 MiB UTF-8 ItemJson+PlanStateJson. Полный rollback без header/items/pin; нельзя выдать усечённый snapshot. Показать предел, не бесконечный retry.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 409
+                    },
+                    "code": {
+                      "enum": [
+                        "syncSnapshotTooLarge"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "itemLimit": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 409,
+                  "detail": "Снимок превышает локальный предел 5000 элементов.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "syncSnapshotTooLarge",
+                  "correlationId": "request-example-s1-409-syncSnapshotTooLarge"
+                }
+              },
+              "byteLimit": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 409,
+                  "detail": "Снимок превышает локальный предел 16 MiB JSON payload.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "syncSnapshotTooLarge",
+                  "correlationId": "request-example-s1-409-syncSnapshotTooLarge"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncSnapshotExpired": {
+        "description": "Правильно подписанный page cursor указывает уже недоступный/истёкший снимок; сохранить drafts/pending, начать bootstrap отдельно.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 410
+                    },
+                    "code": {
+                      "enum": [
+                        "snapshotExpired"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "expired": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 410,
+                  "detail": "Временный снимок недоступен; начните загрузку заново, сохранив черновики и отправку.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "snapshotExpired",
+                  "correlationId": "request-example-s1-410-snapshotExpired"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncResetRequired": {
+        "description": "Аутентичный delta cursor старого streamId, A<PrunedThrough либо A>head/H>head. Нет nextCursor/пустого успеха/clamp. При откате head до успешного resync обязательна смена streamId. Новый stream переводит любой незавершённый pending, включая acknowledgedRefresh, в resetReview.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 410
+                    },
+                    "code": {
+                      "enum": [
+                        "syncResetRequired"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "retention": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 410,
+                  "detail": "История для cursor уже очищена. Нужен новый полный снимок без удаления черновиков/отправки.",
+                  "instance": "/api/v1/sync/changes",
+                  "code": "syncResetRequired",
+                  "correlationId": "request-example-s1-410-syncResetRequired"
+                }
+              },
+              "streamReset": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 410,
+                  "detail": "Поток изменился после восстановления сервера. Перечитайте снимок; прежняя отправка требует проверки.",
+                  "instance": "/api/v1/sync/changes",
+                  "code": "syncResetRequired",
+                  "correlationId": "request-example-s1-410-syncResetRequired"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncBootstrapBusy": {
+        "description": "Заняты4 неистёкших retained snapshots аккаунта и нет reusable same stream/head/pageSize. Не вытеснять действующие; retry с backoff после освобождения. Ошибка вне domain dedup.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 429
+                    },
+                    "code": {
+                      "enum": [
+                        "syncBootstrapBusy"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "capacity": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 429,
+                  "detail": "Локальный предел временных снимков занят. Повторите позже.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "syncBootstrapBusy",
+                  "correlationId": "request-example-s1-429-syncBootstrapBusy"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncBootstrapUnavailable": {
+        "description": "Guard wait>2s или materialization после захвата>5s: отмена/rollback без partial snapshot/pin. Retry с backoff; пределы разработки, не SLA.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/CacheControl"
+          },
+          "X-Correlation-ID": {
+            "$ref": "#/components/headers/CorrelationId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": 503
+                    },
+                    "code": {
+                      "enum": [
+                        "syncBootstrapBusy"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "examples": {
+              "timeout": {
+                "value": {
+                  "type": "about:blank",
+                  "title": "Синхронизация требует внимания",
+                  "status": 503,
+                  "detail": "Не удалось подготовить снимок за локальный бюджет. Повторите позже.",
+                  "instance": "/api/v1/sync/bootstrap",
+                  "code": "syncBootstrapBusy",
+                  "correlationId": "request-example-s1-503-syncBootstrapBusy"
+                }
+              }
             }
           }
         }
@@ -4916,7 +5719,11 @@
               "rangeTooLarge",
               "invalidCursor",
               "occurrenceCompleted",
-              "completionMismatch"
+              "completionMismatch",
+              "snapshotExpired",
+              "syncResetRequired",
+              "syncBootstrapBusy",
+              "syncSnapshotTooLarge"
             ]
           },
           "correlationId": {
@@ -5478,6 +6285,638 @@
             "completionId": "70000000-0000-4000-8000-000000000010"
           }
         ]
+      },
+      "SyncProtocol": {
+        "type": "string",
+        "const": "s1",
+        "description": "Версия формата S1; неизвестная версия останавливает применение без продвижения cursor.",
+        "examples": [
+          "s1"
+        ]
+      },
+      "SyncItemKind": {
+        "type": "string",
+        "enum": [
+          "settings",
+          "category",
+          "definition",
+          "occurrence"
+        ],
+        "description": "Четыре полных sync-агрегата. Отдельных block/Completion/tombstone/root-delete ветвей в S1 нет.",
+        "examples": [
+          "occurrence"
+        ]
+      },
+      "SyncCursor": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "Opaque защищённый token. Purpose bootstrap-page и delta различаются; не D1 PageCursor и не ETag. Owner/stream/позиции/размер внутри token; Int64 не выходит в wire и не читается JS number. Строки opaque-* в примерах —нерабочие иллюстрации, не допустимые серверные подписи.",
+        "examples": [
+          "opaque-s1-delta-after-snapshot"
+        ]
+      },
+      "SyncItem": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/SyncItemKind",
+                "const": "settings"
+              },
+              "value": {
+                "$ref": "#/components/schemas/UserSettings"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "description": "Полностью заменить settings в подтверждённой проекции."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/SyncItemKind",
+                "const": "category"
+              },
+              "value": {
+                "$ref": "#/components/schemas/Category"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "description": "Полностью заменить category в подтверждённой проекции."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/SyncItemKind",
+                "const": "definition"
+              },
+              "value": {
+                "$ref": "#/components/schemas/TaskDefinition"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "description": "Полностью заменить definition в подтверждённой проекции."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/components/schemas/SyncItemKind",
+                "const": "occurrence"
+              },
+              "value": {
+                "$ref": "#/components/schemas/TaskOccurrence"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "description": "Полностью заменить occurrence в подтверждённой проекции."
+          }
+        ],
+        "description": "Закрытый discriminated union; все поля ветви обязательны. settings singleton с Place; остальные keyed by value.id. occurrence включает block/только active Completion; calendarBlock=null удаляет прежний вложенный блок/индекс, completion=null снимает active проекцию без удаления server history. Только fresh C1, LegacyD1 не допускается.",
+        "examples": [
+          {
+            "kind": "settings",
+            "value": {
+              "timezone": "Europe/Moscow",
+              "weekStartsOn": "monday",
+              "place": {
+                "id": "10000000-0000-4000-8000-000000000001",
+                "name": "Дом",
+                "serverVersion": "place_a1"
+              },
+              "serverVersion": "settings_a2"
+            }
+          },
+          {
+            "kind": "category",
+            "value": {
+              "id": "20000000-0000-4000-8000-000000000001",
+              "name": "Работа",
+              "serverVersion": "cat_a1"
+            }
+          },
+          {
+            "kind": "definition",
+            "value": {
+              "id": "30000000-0000-4000-8000-000000000001",
+              "title": "Подготовить отчёт",
+              "description": "Проверить данные и написать выводы",
+              "categoryId": "20000000-0000-4000-8000-000000000001",
+              "importance": "high",
+              "difficulty": "medium",
+              "executionPriority": 4,
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0,
+              "serverVersion": "def_a1"
+            }
+          },
+          {
+            "kind": "occurrence",
+            "value": {
+              "id": "40000000-0000-4000-8000-000000000001",
+              "definitionId": "30000000-0000-4000-8000-000000000001",
+              "logicalDate": "2026-10-12",
+              "sourceDefinitionVersion": "def_a1",
+              "constraintsSnapshot": {
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0
+              },
+              "remainingWorkMinutes": 90,
+              "placementStatus": "planned",
+              "calendarBlock": {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              },
+              "serverVersion": "occ_a2",
+              "completionStatus": "incomplete",
+              "completion": null
+            }
+          }
+        ]
+      },
+      "BootstrapPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "$ref": "#/components/schemas/SyncProtocol"
+          },
+          "streamId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "snapshotId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/CompletionInstant"
+          },
+          "asOfCursor": {
+            "$ref": "#/components/schemas/SyncCursor"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncItem"
+            },
+            "maxItems": 100
+          },
+          "nextPageCursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncCursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "streamId",
+          "snapshotId",
+          "expiresAt",
+          "asOfCursor",
+          "planState",
+          "items",
+          "nextPageCursor"
+        ],
+        "description": "Материализованный согласованный снимок. Все страницы одного snapshot имеют одинаковые streamId/snapshotId/expiresAt/asOfCursor/planState; фиксированные ordinal/pageSize. asOfCursor —delta после watermark W, не позиция загрузки страницы. staging публикуется целиком только при nextPageCursor=null; settings есть ровно один во всём снимке. Cursor примеров не исполняется сервером.",
+        "examples": [
+          {
+            "protocol": "s1",
+            "streamId": "80000000-0000-4000-8000-000000000001",
+            "snapshotId": "81000000-0000-4000-8000-000000000001",
+            "expiresAt": "2026-10-15T12:15:00.000Z",
+            "asOfCursor": "opaque-s1-delta-after-snapshot",
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            },
+            "items": [
+              {
+                "kind": "settings",
+                "value": {
+                  "timezone": "Europe/Moscow",
+                  "weekStartsOn": "monday",
+                  "place": {
+                    "id": "10000000-0000-4000-8000-000000000001",
+                    "name": "Дом",
+                    "serverVersion": "place_a1"
+                  },
+                  "serverVersion": "settings_a2"
+                }
+              },
+              {
+                "kind": "category",
+                "value": {
+                  "id": "20000000-0000-4000-8000-000000000001",
+                  "name": "Работа",
+                  "serverVersion": "cat_a1"
+                }
+              }
+            ],
+            "nextPageCursor": "opaque-s1-bootstrap-page-2"
+          },
+          {
+            "protocol": "s1",
+            "streamId": "80000000-0000-4000-8000-000000000001",
+            "snapshotId": "81000000-0000-4000-8000-000000000001",
+            "expiresAt": "2026-10-15T12:15:00.000Z",
+            "asOfCursor": "opaque-s1-delta-after-snapshot",
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            },
+            "items": [
+              {
+                "kind": "definition",
+                "value": {
+                  "id": "30000000-0000-4000-8000-000000000001",
+                  "title": "Подготовить отчёт",
+                  "description": "Проверить данные и написать выводы",
+                  "categoryId": "20000000-0000-4000-8000-000000000001",
+                  "importance": "high",
+                  "difficulty": "medium",
+                  "executionPriority": 4,
+                  "durationPolicy": {
+                    "mode": "fixedWork",
+                    "requiredWorkMinutes": 90
+                  },
+                  "splitAllowed": false,
+                  "mobilityPolicy": "movable",
+                  "availabilityRules": {
+                    "timezone": "Europe/Moscow",
+                    "windows": [
+                      {
+                        "daysOfWeek": [
+                          "monday",
+                          "tuesday",
+                          "wednesday",
+                          "thursday",
+                          "friday"
+                        ],
+                        "startLocalTime": "18:00",
+                        "endLocalTime": "22:00",
+                        "endDayOffset": 0
+                      }
+                    ],
+                    "dateExceptions": []
+                  },
+                  "placeId": "10000000-0000-4000-8000-000000000001",
+                  "requiredRestMinutes": 0,
+                  "serverVersion": "def_a1"
+                }
+              },
+              {
+                "kind": "occurrence",
+                "value": {
+                  "id": "40000000-0000-4000-8000-000000000001",
+                  "definitionId": "30000000-0000-4000-8000-000000000001",
+                  "logicalDate": "2026-10-12",
+                  "sourceDefinitionVersion": "def_a1",
+                  "constraintsSnapshot": {
+                    "durationPolicy": {
+                      "mode": "fixedWork",
+                      "requiredWorkMinutes": 90
+                    },
+                    "splitAllowed": false,
+                    "mobilityPolicy": "movable",
+                    "availabilityRules": {
+                      "timezone": "Europe/Moscow",
+                      "windows": [
+                        {
+                          "daysOfWeek": [
+                            "monday",
+                            "tuesday",
+                            "wednesday",
+                            "thursday",
+                            "friday"
+                          ],
+                          "startLocalTime": "18:00",
+                          "endLocalTime": "22:00",
+                          "endDayOffset": 0
+                        }
+                      ],
+                      "dateExceptions": []
+                    },
+                    "placeId": "10000000-0000-4000-8000-000000000001",
+                    "requiredRestMinutes": 0
+                  },
+                  "remainingWorkMinutes": 90,
+                  "placementStatus": "planned",
+                  "calendarBlock": {
+                    "id": "50000000-0000-4000-8000-000000000001",
+                    "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                    "kind": "task",
+                    "startInstant": "2026-10-12T15:00:00Z",
+                    "endInstant": "2026-10-12T16:30:00Z",
+                    "fixed": false,
+                    "serverVersion": "block_a1"
+                  },
+                  "serverVersion": "occ_a2",
+                  "completionStatus": "incomplete",
+                  "completion": null
+                }
+              }
+            ],
+            "nextPageCursor": null
+          }
+        ]
+      },
+      "SyncChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "item": {
+            "$ref": "#/components/schemas/SyncItem"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "id",
+          "opId",
+          "item",
+          "planState"
+        ],
+        "description": "Один committed шаг существующей domain-команды: стабильный change id, полный aggregate replacement и post-change PlanState. Sequence отдельный от input revision и скрыт внутри cursor. opId не заменяет ACK/replay. No-op/replay/domain error не создают запись. Содержимое immutable, не перечитывается из нынешних entities.",
+        "examples": [
+          {
+            "id": "82000000-0000-4000-8000-000000000001",
+            "opId": "60000000-0000-4000-8000-000000000030",
+            "item": {
+              "kind": "occurrence",
+              "value": {
+                "id": "40000000-0000-4000-8000-000000000001",
+                "definitionId": "30000000-0000-4000-8000-000000000001",
+                "logicalDate": "2026-10-12",
+                "sourceDefinitionVersion": "def_a1",
+                "constraintsSnapshot": {
+                  "durationPolicy": {
+                    "mode": "fixedWork",
+                    "requiredWorkMinutes": 90
+                  },
+                  "splitAllowed": false,
+                  "mobilityPolicy": "movable",
+                  "availabilityRules": {
+                    "timezone": "Europe/Moscow",
+                    "windows": [
+                      {
+                        "daysOfWeek": [
+                          "monday",
+                          "tuesday",
+                          "wednesday",
+                          "thursday",
+                          "friday"
+                        ],
+                        "startLocalTime": "18:00",
+                        "endLocalTime": "22:00",
+                        "endDayOffset": 0
+                      }
+                    ],
+                    "dateExceptions": []
+                  },
+                  "placeId": "10000000-0000-4000-8000-000000000001",
+                  "requiredRestMinutes": 0
+                },
+                "remainingWorkMinutes": 90,
+                "placementStatus": "unplanned",
+                "calendarBlock": null,
+                "serverVersion": "occ_s1_unplaced",
+                "completionStatus": "incomplete",
+                "completion": null
+              }
+            },
+            "planState": {
+              "planningInputRevision": "input_s1_6",
+              "scheduleVersion": "schedule_s1_2"
+            }
+          },
+          {
+            "id": "82000000-0000-4000-8000-000000000002",
+            "opId": "60000000-0000-4000-8000-000000000031",
+            "item": {
+              "kind": "category",
+              "value": {
+                "id": "20000000-0000-4000-8000-000000000002",
+                "name": "Личное",
+                "serverVersion": "cat_s1_2"
+              }
+            },
+            "planState": {
+              "planningInputRevision": "input_s1_6",
+              "scheduleVersion": "schedule_s1_2"
+            }
+          }
+        ]
+      },
+      "ChangesPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol": {
+            "$ref": "#/components/schemas/SyncProtocol"
+          },
+          "streamId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncChange"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "$ref": "#/components/schemas/SyncCursor"
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol",
+          "streamId",
+          "changes",
+          "nextCursor",
+          "hasMore"
+        ],
+        "description": "Изменения по возрастанию скрытого sequence, после after A и до фиксированного horizon H. hasMore=true сохраняет H/pageSize; false выдаёт tail cursor после H. Пустой успешный ответ допустим только без пропущенных изменений и без backward position. Cursor применяется атомарно с проекциями одной memory generation; pageSize максимум100.",
+        "examples": [
+          {
+            "protocol": "s1",
+            "streamId": "80000000-0000-4000-8000-000000000001",
+            "changes": [
+              {
+                "id": "82000000-0000-4000-8000-000000000001",
+                "opId": "60000000-0000-4000-8000-000000000030",
+                "item": {
+                  "kind": "occurrence",
+                  "value": {
+                    "id": "40000000-0000-4000-8000-000000000001",
+                    "definitionId": "30000000-0000-4000-8000-000000000001",
+                    "logicalDate": "2026-10-12",
+                    "sourceDefinitionVersion": "def_a1",
+                    "constraintsSnapshot": {
+                      "durationPolicy": {
+                        "mode": "fixedWork",
+                        "requiredWorkMinutes": 90
+                      },
+                      "splitAllowed": false,
+                      "mobilityPolicy": "movable",
+                      "availabilityRules": {
+                        "timezone": "Europe/Moscow",
+                        "windows": [
+                          {
+                            "daysOfWeek": [
+                              "monday",
+                              "tuesday",
+                              "wednesday",
+                              "thursday",
+                              "friday"
+                            ],
+                            "startLocalTime": "18:00",
+                            "endLocalTime": "22:00",
+                            "endDayOffset": 0
+                          }
+                        ],
+                        "dateExceptions": []
+                      },
+                      "placeId": "10000000-0000-4000-8000-000000000001",
+                      "requiredRestMinutes": 0
+                    },
+                    "remainingWorkMinutes": 90,
+                    "placementStatus": "unplanned",
+                    "calendarBlock": null,
+                    "serverVersion": "occ_s1_unplaced",
+                    "completionStatus": "incomplete",
+                    "completion": null
+                  }
+                },
+                "planState": {
+                  "planningInputRevision": "input_s1_6",
+                  "scheduleVersion": "schedule_s1_2"
+                }
+              }
+            ],
+            "nextCursor": "opaque-s1-delta-continuation-fixed-horizon",
+            "hasMore": true
+          },
+          {
+            "protocol": "s1",
+            "streamId": "80000000-0000-4000-8000-000000000001",
+            "changes": [
+              {
+                "id": "82000000-0000-4000-8000-000000000002",
+                "opId": "60000000-0000-4000-8000-000000000031",
+                "item": {
+                  "kind": "category",
+                  "value": {
+                    "id": "20000000-0000-4000-8000-000000000002",
+                    "name": "Личное",
+                    "serverVersion": "cat_s1_2"
+                  }
+                },
+                "planState": {
+                  "planningInputRevision": "input_s1_6",
+                  "scheduleVersion": "schedule_s1_2"
+                }
+              }
+            ],
+            "nextCursor": "opaque-s1-delta-tail-after-horizon",
+            "hasMore": false
+          },
+          {
+            "protocol": "s1",
+            "streamId": "80000000-0000-4000-8000-000000000001",
+            "changes": [],
+            "nextCursor": "opaque-s1-delta-tail-after-horizon",
+            "hasMore": false
+          }
+        ]
       }
     }
   },
@@ -5491,6 +6930,12 @@
     "C1-02",
     "C1-03",
     "C1-04",
-    "C1-05"
+    "C1-05",
+    "S1-01",
+    "S1-02",
+    "S1-03",
+    "S1-04",
+    "S1-05",
+    "S1-06"
   ]
 }

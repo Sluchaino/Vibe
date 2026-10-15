@@ -202,3 +202,9 @@ summary { cursor: pointer; color: var(--green); line-height: 1.5; font-weight: 6
   .site-footer { flex-direction: column; align-items: start; gap: 7px; padding: 22px 0; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+.sync-status { color: var(--muted, #51645b); font-size: .9rem; margin: .5rem 0 1rem; }
+.local-recovery > summary { cursor: pointer; font-weight: 650; padding: .3rem 0; }
+.saved-drafts { list-style: none; padding: 0; display: grid; gap: .65rem; max-height: 22rem; overflow: auto; }
+.saved-drafts li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid #e1ebe3; padding: .6rem 0; }
+.saved-drafts small { display: block; color: #5d6e63; }
+@media (max-width: 600px) { .saved-drafts li { align-items: start; flex-direction: column; } }

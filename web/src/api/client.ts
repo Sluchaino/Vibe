@@ -80,7 +80,7 @@ export async function restoreSession(expectedUserId?: string) {
   if (after.userId !== before.userId || (expectedUserId && after.userId !== expectedUserId)) identityMismatch(stamp)
   return after
 }
-async function sendOwned<T>(path: string, method: string, body: unknown, stamp: TransportStamp, owner: string, version?: string) {
+async function sendOwned<T>(path: string, method: string, body: unknown, stamp: TransportStamp, owner: string, version?: string, beforeDispatch?: () => void) {
   assertTransport(stamp)
   if (stamp.userId !== owner) identityMismatch(stamp)
   const before = await getMe()
@@ -96,6 +96,7 @@ async function sendOwned<T>(path: string, method: string, body: unknown, stamp: 
   const headers: Record<string, string> = { 'X-CSRF-TOKEN': token, ...(version ? { 'If-Match': `"${version}"` } : {}) }
   // No await between this final synchronous guard and raw's fetch dispatch.
   assertTransport(stamp)
+  beforeDispatch?.()
   return raw<T>(path, method, body, headers)
 }
 export async function login(userName: string, password: string) {
@@ -141,10 +142,10 @@ export async function read<T>(path: string): Promise<T> {
   if (current.userId !== owner) { expired(); throw new IdentityChangedError('Аккаунт изменился. Данные скрыты, ввод сохранён для исходного аккаунта.') }
   return result.data
 }
-export async function mutate(command: PendingCommand) {
+export async function mutate(command: PendingCommand, beforeDispatch?: () => void) {
   assertCommandIdentity(command, identityState.userId)
   const stamp = transportStamp()
-  const send = () => sendOwned<unknown>(command.path, command.method, command.body, stamp, command.userId, command.version)
+  const send = () => sendOwned<unknown>(command.path, command.method, command.body, stamp, command.userId, command.version, beforeDispatch)
   let result: ApiResult<unknown>
   try { result = await send() } catch (error) {
     if (!(error instanceof ApiError) || error.problem.code !== 'invalidAntiforgery') throw error

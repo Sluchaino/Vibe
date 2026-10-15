@@ -23,7 +23,7 @@ export function CompletionForm({ userId, occurrence, title, settings, refreshReq
     try {
       const intent = completionIntent(observed)
       setLastReopen(intent.action === 'reopen')
-      await command.submit(completionCommand(observed, intent))
+      await command.submit(completionCommand(observed, intent), { value: intent, base: observed })
     } catch (error) { command.setError(error as Error) }
   }
   async function reload() {
@@ -31,7 +31,7 @@ export function CompletionForm({ userId, occurrence, title, settings, refreshReq
     try { const fresh = await onRefresh(occurrence.id); setObserved(fresh.occurrence); setReloadNeeded(false) } catch (error) { setReloadNeeded(true); command.setError(error as Error) } finally { setReloading(false) }
   }
   const completed = isCompleted(observed)
-  const blocked = command.busy || !!command.pending || reloading || reloadNeeded || refreshRequired || !hasCurrentCompletion(observed)
+  const blocked = command.blocked || command.busy || reloading || reloadNeeded || refreshRequired || !hasCurrentCompletion(observed)
   return <Panel title={`Завершение · ${title}`} onClose={onClose}>
     <div className={`completion-state ${completed ? 'completion-state--done' : ''}`} role="status"><strong>{completed ? 'Выполнено' : 'Не выполнено'}</strong>{observed.completion && <p>Отмечено выполненным {completionTimeLabel(observed.completion.completedAt, settings.timezone)} · {settings.timezone}</p>}</div>
     <p className="muted">Отметка относится только к этому выполнению. Календарный блок и его фиксация сохраняются.</p>

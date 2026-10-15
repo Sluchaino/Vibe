@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Vibe.Api.Data;
 using Vibe.Api.Features.D1;
+using Vibe.Api.Features.Sync;
 
 var builder = WebApplication.CreateBuilder(args);
 string? localConfig = null;
@@ -29,6 +30,14 @@ if (builder.Environment.IsDevelopment())
 }
 builder.Services.AddDbContext<VibeDb>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("Vibe") ?? throw new InvalidOperationException("PostgreSQL configuration is required.")));
 builder.Services.AddScoped<D1Service>();
+builder.Services.AddScoped<SyncService>();
+builder.Services.AddScoped<SyncMaintenance>();
+builder.Services.AddSingleton<SyncCursor>();
+builder.Services.AddOptions<SyncOptions>().Bind(builder.Configuration.GetSection("Sync"))
+    .Validate(o => o.FeedRetentionDays > 0 && o.BootstrapTtlMinutes > 0 && o.MaxSnapshotsPerUser > 0
+        && o.MaxSnapshotItems > 0 && o.MaxSnapshotPayloadBytes > 0 && o.GuardTimeoutMilliseconds > 0
+        && o.BuildTimeoutMilliseconds > 0 && o.CleanupIntervalSeconds > 0, "Sync limits must be positive.").ValidateOnStart();
+builder.Services.AddHostedService<SyncCleanupWorker>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddIdentity<VibeUser, IdentityRole>(options =>
 {
@@ -69,6 +78,20 @@ builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogL
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 var app = builder.Build();
 
+// Run only while the API is stopped after restoring its database. An explicit acknowledgement
+// is required; this branch never starts HTTP listeners or applies a migration.
+if (app.Configuration.GetValue("SyncMaintenance:ResetAllStreams", false))
+{
+    if (app.Configuration["SyncMaintenance:Confirmation"] != "API_STOPPED_AFTER_RESTORE")
+        throw new InvalidOperationException("Stream reset requires API_STOPPED_AFTER_RESTORE confirmation.");
+    await using var maintenanceScope = app.Services.CreateAsyncScope();
+    var maintenanceDb = maintenanceScope.ServiceProvider.GetRequiredService<VibeDb>();
+    var owners = await maintenanceDb.SyncStreams.AsNoTracking().Select(s => s.UserId).ToListAsync();
+    foreach (string owner in owners)
+        await maintenanceScope.ServiceProvider.GetRequiredService<SyncMaintenance>().ResetStream(owner, CancellationToken.None);
+    return;
+}
+
 if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -87,6 +110,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
             if (!created.Succeeded) throw new InvalidOperationException("Local account creation failed validation.");
         }
         if (!await db.Plans.AnyAsync(x => x.UserId == user.Id)) db.Plans.Add(new PlanRow { UserId = user.Id });
+        if (!await db.SyncStreams.AnyAsync(x => x.UserId == user.Id)) db.SyncStreams.Add(new SyncStreamRow { UserId = user.Id });
         if (!await db.Settings.AnyAsync(x => x.UserId == user.Id))
         {
             string timezone = seed["Timezone"] ?? "Europe/Moscow"; TimeRules.Zone(timezone);
@@ -180,6 +204,8 @@ domain.MapPost("/occurrences/{id}/placement", (HttpContext c, D1Service d, strin
 domain.MapPost("/occurrences/{id}/completion", (HttpContext c, D1Service d, string id) => d.Mutate(c, "complete", id));
 domain.MapPost("/occurrences/{id}/completion/reopen", (HttpContext c, D1Service d, string id) => d.Mutate(c, "reopen", id));
 domain.MapGet("/calendar", (HttpContext c, D1Service d) => d.Read(c, "calendar"));
+domain.MapGet("/sync/bootstrap", (HttpContext c, SyncService s) => s.Bootstrap(c));
+domain.MapGet("/sync/changes", (HttpContext c, SyncService s) => s.Changes(c));
 app.MapFallback("/api/{**path}", (HttpContext c) => new ApiReply(404, Wire.Json(Wire.Problem(c, new DomainError(404, "notFound")))).ExecuteAsync(c));
 app.Run();
 

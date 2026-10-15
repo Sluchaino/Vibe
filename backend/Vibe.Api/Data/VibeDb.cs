@@ -99,10 +99,15 @@ public class VibeDb(DbContextOptions<VibeDb> options) : IdentityDbContext<VibeUs
     public DbSet<BlockRow> Blocks => Set<BlockRow>();
     public DbSet<OperationRow> Operations => Set<OperationRow>();
     public DbSet<CompletionRow> Completions => Set<CompletionRow>();
+    public DbSet<SyncStreamRow> SyncStreams => Set<SyncStreamRow>();
+    public DbSet<SyncChangeRow> SyncChanges => Set<SyncChangeRow>();
+    public DbSet<SyncSnapshotRow> SyncSnapshots => Set<SyncSnapshotRow>();
+    public DbSet<SyncSnapshotItemRow> SyncSnapshotItems => Set<SyncSnapshotItemRow>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+        SyncModel.Configure(b);
         b.Entity<SettingsRow>().ToTable("UserSettings").HasKey(x => x.UserId);
         b.Entity<SettingsRow>().HasOne<VibeUser>().WithOne().HasForeignKey<SettingsRow>(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<PlanRow>().ToTable("UserPlanState").HasKey(x => x.UserId);
