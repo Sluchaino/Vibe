@@ -29,6 +29,9 @@ export interface PlaceInput { id: string; name: string }
 export interface UserSettings { timezone: string; weekStartsOn: 'monday'; place: Place | null; serverVersion: Version }
 export interface Category { id: string; name: string; serverVersion: Version }
 export interface CalendarBlock { id: string; occurrenceId: string; kind: 'task'; startInstant: string; endInstant: string; fixed: boolean; serverVersion: Version }
+export interface Completion { id: string; occurrenceId: string; completedAt: string; revokedAt: string | null; source: 'manual'; serverVersion: Version }
+export interface ActiveCompletion extends Completion { revokedAt: null }
+export type CompletionStatus = 'incomplete' | 'completed'
 export interface TaskOccurrence {
   id: string
   definitionId: string
@@ -39,12 +42,16 @@ export interface TaskOccurrence {
   placementStatus: 'unplanned' | 'planned'
   calendarBlock: CalendarBlock | null
   serverVersion: Version
+  completionStatus: CompletionStatus
+  completion: ActiveCompletion | null
 }
+export type TaskOccurrenceLegacyD1 = Omit<TaskOccurrence, 'completionStatus' | 'completion'>
 export interface PlanState { planningInputRevision: Version; scheduleVersion: Version }
 export interface SettingsResponse { settings: UserSettings; planState: PlanState }
 export interface DefinitionResponse { definition: TaskDefinition; planState: PlanState }
 export interface CategoryResponse { category: Category; planState: PlanState }
 export interface OccurrenceResponse { occurrence: TaskOccurrence; planState: PlanState }
+export type OccurrenceMutationResponse = OccurrenceResponse | { occurrence: TaskOccurrenceLegacyD1; planState: PlanState }
 export interface Page<T> { items: T[]; nextCursor: string | null; planState: PlanState }
 export interface CalendarResponse { from: string; to: string; blocks: CalendarBlock[]; occurrences: TaskOccurrence[]; definitions: TaskDefinition[]; planState: PlanState }
 export interface MeResponse { userId: string; userName: string }
@@ -55,6 +62,8 @@ export interface CreateDefinitionRequest extends DefinitionFields { opId: string
 export interface UpdateDefinitionRequest extends DefinitionFields { opId: string }
 export interface CreateOccurrenceRequest { opId: string; id: string; definitionVersion: Version; logicalDate: string }
 export interface UpdateOccurrenceRequest { opId: string; logicalDate: string; constraintsSnapshot: ConstraintsSnapshot; allowFixedChange: boolean }
+export interface CompleteOccurrenceRequest { opId: string }
+export interface ReopenOccurrenceRequest { opId: string; completionId: string }
 interface PlacementBase { opId: string; baseScheduleVersion: Version; allowFixedChange: boolean }
 export type PlacementCommand =
   | (PlacementBase & { action: 'place' | 'move'; localStart: string; timezone: string; utcOffset: string })
@@ -67,7 +76,7 @@ export interface ProblemDetails {
   currentPlanState?: PlanState
   currentSettings?: UserSettings
   currentDefinition?: TaskDefinition
-  currentOccurrence?: TaskOccurrence
+  currentOccurrence?: TaskOccurrence | TaskOccurrenceLegacyD1
   conflictingBlockIds?: string[]
   validUtcOffsets?: string[]
 }

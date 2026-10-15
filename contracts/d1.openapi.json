@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
-    "title": "Vibe D1 — ручные задачи и Web-календарь",
-    "version": "1.0.0",
-    "description": "Формализация D1-01–05, принятых владельцем 12.10.2026; docs/DECISIONS.md и FIRST_SLICE_PROPOSAL.md. Этот номер — версия документа, маршрут /api/v1 — версия общего API. Только D1: real Identity/cookie/antiforgery, PostgreSQL, manual fixedWork, одно явное Place. JSON camelCase, enum strings, UUID, opaque string versions; unknown mutable fields/query и неподдерживаемые constraints отклоняются. Ownership всегда выводится из authenticated Identity. Domain opId scope = current user. Все ответы no-store. Same-origin HTTPS; auth cookie HttpOnly/Secure/SameSite=Strict. Описание семантики, которую JSON Schema не выражает, обязательно для Backend/Web; contracts/README.md и docs/D1_IMPLEMENTATION_NOTES.md."
+    "title": "Vibe D1 + C1 — ручные задачи, календарь и обратимое завершение",
+    "version": "2.0.0",
+    "description": "Формализация D1-01–05, принятых владельцем 12.10.2026; docs/DECISIONS.md и FIRST_SLICE_PROPOSAL.md. Этот номер — версия документа, маршрут /api/v1 — версия общего API. Только D1: real Identity/cookie/antiforgery, PostgreSQL, manual fixedWork, одно явное Place. JSON camelCase, enum strings, UUID, opaque string versions; unknown mutable fields/query и неподдерживаемые constraints отклоняются. Ownership всегда выводится из authenticated Identity. Domain opId scope = current user. Все ответы no-store. Same-origin HTTPS; auth cookie HttpOnly/Secure/SameSite=Strict. Описание семантики, которую JSON Schema не выражает, обязательно для Backend/Web; contracts/README.md и docs/D1_IMPLEMENTATION_NOTES.md. C1 ревизия 2/C1-01–05 принята владельцем 13.10.2026: «Утвердить C1 с отменой и реализовать», docs/DECISIONS.md и COMPLETION_SLICE_PROPOSAL.md. Это согласованная новая закрытая occurrence форма на /api/v1 для совместно обновляемого Backend/Web; legacy client compatibility не заявляется. Старые operation results immutable и могут replay в точной LegacyD1 форме только при Idempotency-Replayed=true. Один active факт, revoked история/context сохраняются; ручные отметки не выдумывают useful work. Остальные auth/D1 правила не меняются."
   },
   "servers": [
     {
@@ -44,9 +44,6 @@
         "summary": "Получить токен antiforgery",
         "description": "Доступно анонимному и вошедшему браузеру. Получить заново после смены identity; no-store. Cookie/token не имеют opId.",
         "responses": {
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
           "200": {
             "description": "Парная cookie и requestToken",
             "headers": {
@@ -75,6 +72,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
           }
         },
         "security": []
@@ -203,9 +203,6 @@
         "summary": "Прочитать текущую identity",
         "description": "Не возвращает cookie/token/секреты. При истёкшем сеансе возвращает JSON ProblemDetails 401, без HTML redirect.",
         "responses": {
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
           "200": {
             "description": "Текущий пользователь",
             "headers": {
@@ -232,6 +229,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
           "401": {
             "$ref": "#/components/responses/Error401"
           },
@@ -250,9 +250,6 @@
         "summary": "Прочитать timezone/неделю/единственное место",
         "description": "Settings ресурс существует у подготовленного account и имеет ETag даже пока place=null.",
         "responses": {
-          "400": {
-            "$ref": "#/components/responses/Error400"
-          },
           "200": {
             "description": "Настройки и согласованное planState",
             "headers": {
@@ -293,6 +290,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
           },
           "401": {
             "$ref": "#/components/responses/Error401"
@@ -1032,7 +1032,7 @@
           "Tasks"
         ],
         "summary": "Создать ручное occurrence из версии definition",
-        "description": "id в path — definitionId. definitionVersion в теле без кавычек проверяется атомарно; stale ->412 staleDefinition. Текущий constraintsSnapshot копируется сервером, sourceDefinitionVersion сохраняется. Точный duplicate logicalDate разрешён, одинаковый occurrence id — нет. Повышает planningInputRevision, не scheduleVersion. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "description": "id в path — definitionId. definitionVersion в теле без кавычек проверяется атомарно; stale ->412 staleDefinition. Текущий constraintsSnapshot копируется сервером, sourceDefinitionVersion сохраняется. Точный duplicate logicalDate разрешён, одинаковый occurrence id — нет. Повышает planningInputRevision, не scheduleVersion. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId. C1: новый occurrence всегда incomplete/completion=null; другое occurrence этого definition не завершается и не открывается от complete/reopen одного.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
@@ -1063,7 +1063,7 @@
         },
         "responses": {
           "201": {
-            "description": "Незапланированное occurrence создано",
+            "description": "Незапланированное occurrence создано Только historical replay может вернуть точный LegacyD1 body; свежий результат всегда C1. Клиент обязательно перечитывает состояние после replay.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/CacheControl"
@@ -1084,7 +1084,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OccurrenceResponse"
+                  "$ref": "#/components/schemas/OccurrenceMutationResponse"
                 },
                 "examples": {
                   "example": {
@@ -1125,7 +1125,9 @@
                         "remainingWorkMinutes": 90,
                         "placementStatus": "unplanned",
                         "calendarBlock": null,
-                        "serverVersion": "occ_a1"
+                        "serverVersion": "occ_a1",
+                        "completionStatus": "incomplete",
+                        "completion": null
                       },
                       "planState": {
                         "planningInputRevision": "input_a4",
@@ -1165,7 +1167,7 @@
           "Tasks"
         ],
         "summary": "Прочитать occurrences/список незапланированных",
-        "description": "placementStatus=unplanned даёт весь незапланированный объём; logicalDate — метка выполнения, не день размещения. Параметры курсора включают все фильтры. Неизвестные query параметры ->400.",
+        "description": "placementStatus=unplanned даёт весь незапланированный объём; logicalDate — метка выполнения, не день размещения. Параметры курсора включают все фильтры. Неизвестные query параметры ->400. C1 completionStatus фильтрует наличие active (revokedAt=null) до пагинации; placementStatus сохраняет физический смысл блока. Actionable unplanned = placementStatus=unplanned&completionStatus=incomplete. После reopen без блока снова actionable. Старый cursor разрешён только с теми же прежними фильтрами, с новым completionStatus ->400 invalidCursor. UUID порядок/лимит 100 сохраняются.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PageSize"
@@ -1184,6 +1186,9 @@
           },
           {
             "$ref": "#/components/parameters/PlacementStatus"
+          },
+          {
+            "$ref": "#/components/parameters/CompletionStatus"
           }
         ],
         "responses": {
@@ -1239,7 +1244,7 @@
           "Tasks"
         ],
         "summary": "Прочитать occurrence со snapshot и блоком",
-        "description": "ETag occurrence общий для snapshot/его calendar commands; версию блока не использовать как базу команд.",
+        "description": "ETag occurrence общий для snapshot/его calendar commands; версию блока не использовать как базу команд. Возвращается только текущая active Completion/null; revoked история отдельно в БД. Все поля C1 обязательны у свежего GET.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
@@ -1311,7 +1316,9 @@
                           "fixed": false,
                           "serverVersion": "block_a1"
                         },
-                        "serverVersion": "occ_a2"
+                        "serverVersion": "occ_a2",
+                        "completionStatus": "incomplete",
+                        "completion": null
                       },
                       "planState": {
                         "planningInputRevision": "input_a5",
@@ -1343,7 +1350,7 @@
           "Tasks"
         ],
         "summary": "Явно изменить snapshot/logicalDate",
-        "description": "Metadata definition не меняются. При существующем блоке новый snapshot обязан сохранить допустимость и полный elapsed fixedWork, иначе 409 invalidExistingPlacement без изменения состояния. Снятие effectiveFixed через mobilityPolicy требует allowFixedChange=true. Повышает occurrence.serverVersion/planningInputRevision, не scheduleVersion; блок не правится скрыто. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "description": "Metadata definition не меняются. При существующем блоке новый snapshot обязан сохранить допустимость и полный elapsed fixedWork, иначе 409 invalidExistingPlacement без изменения состояния. Снятие effectiveFixed через mobilityPolicy требует allowFixedChange=true. Повышает occurrence.serverVersion/planningInputRevision, не scheduleVersion; блок не правится скрыто. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId. C1: после структурной проверки DTO и ownership целевого occurrence порядок зависит от наличия active Completion. Для incomplete сохраняется D1: новые snapshot references и допустимость дат проверяются до If-Match, затем остальные D1 условия. Для active сначала If-Match: old ETag ->412, current ETag ->409 occurrenceCompleted до новых snapshot references/availability, даже для no-op. После reopen снова действует incomplete D1 порядок. allowFixedChange не обходит завершение.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
@@ -1404,7 +1411,7 @@
         },
         "responses": {
           "200": {
-            "description": "Сохранённое occurrence",
+            "description": "Сохранённое occurrence Только historical replay может вернуть точный LegacyD1 body; свежий результат всегда C1. Клиент обязательно перечитывает состояние после replay.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/CacheControl"
@@ -1422,7 +1429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OccurrenceResponse"
+                  "$ref": "#/components/schemas/OccurrenceMutationResponse"
                 },
                 "examples": {
                   "example": {
@@ -1471,7 +1478,9 @@
                           "fixed": false,
                           "serverVersion": "block_a1"
                         },
-                        "serverVersion": "occ_a2"
+                        "serverVersion": "occ_a2",
+                        "completionStatus": "incomplete",
+                        "completion": null
                       },
                       "planState": {
                         "planningInputRevision": "input_a5",
@@ -1514,7 +1523,7 @@
           "Calendar"
         ],
         "summary": "Прочитать календарь в instant range",
-        "description": "Полуоткрытый диапазон; возвращаются все пересекающие его блоки без обрезания, также snapshots/metadata и обе revision из согласованного read. Максимум 31 различная локальная дата, интервал которой пересекает [from,to), в settings.timezone. UTC+24h для день/неделя запрещён. Calendar не создаёт Completion и не включает solver.",
+        "description": "Полуоткрытый диапазон; возвращаются все пересекающие его блоки без обрезания, также snapshots/metadata и обе revision из согласованного read. Максимум 31 различная локальная дата, интервал которой пересекает [from,to), в settings.timezone. UTC+24h для день/неделя запрещён. Calendar не создаёт Completion и не включает solver. C1: завершённый блок остаётся занятым с прежней длиной N и version, текущие active факты читаются в том же согласованном snapshot. Не выводить длительность блока из remaining=0 и не создавать календарный block факта.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CalendarFrom"
@@ -1600,7 +1609,9 @@
                             "fixed": false,
                             "serverVersion": "block_a1"
                           },
-                          "serverVersion": "occ_a2"
+                          "serverVersion": "occ_a2",
+                          "completionStatus": "incomplete",
+                          "completion": null
                         }
                       ],
                       "definitions": [
@@ -1670,7 +1681,7 @@
           "Calendar"
         ],
         "summary": "Атомарно place/move/unplace/setFixed",
-        "description": "If-Match — версия occurrence. В одном per-user guard/транзакции сначала проверяются entity version (412), затем baseScheduleVersion (409 staleSchedule), constraints/DST/пересечения/fixed confirmation. Все блоки пользователя [start,end) непересекающиеся; касание end=start допустимо. Принятая команда меняет occurrence.serverVersion, созданный/изменённый block.serverVersion и обе plan revision; unplace удаляет только блок. Длина всегда requiredWorkMinutes elapsed UTC minutes, end клиент не передаёт. allowFixedChange=true — ручное подтверждение, не разрешение обходить другие constraints. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId.",
+        "description": "If-Match — версия occurrence. В одном per-user guard/транзакции сначала проверяются entity version (412), затем baseScheduleVersion (409 staleSchedule), constraints/DST/пересечения/fixed confirmation. Все блоки пользователя [start,end) непересекающиеся; касание end=start допустимо. Принятая команда меняет occurrence.serverVersion, созданный/изменённый block.serverVersion и обе plan revision; unplace удаляет только блок. Длина всегда requiredWorkMinutes elapsed UTC minutes, end клиент не передаёт. allowFixedChange=true — ручное подтверждение, не разрешение обходить другие constraints. Результат команды (включая окончательные предметные 400/404/409/412/428 при разбираемом JSON и валидном opId) и fingerprint атомарно сохраняются под per-user guard. Проверка replay предшествует текущим версиям/инвариантам; повтор с другим method/path/If-Match/body ->409 idempotencyMismatch без замены исходной записи. 401/403, транспорт, неразбираемый JSON/невалидный opId не записываются. Replay требует текущих identity/antiforgery; не повышает revision. Исправление данных/конфликта использует новый opId. C1: после If-Match active status проверяется до baseScheduleVersion и всех календарных правил. При active ->409 occurrenceCompleted для каждой place/move/unplace/setFixed, включая no-op и allowFixedChange=true; old ETag сначала412. После reopen обычные D1 rules.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
@@ -1735,7 +1746,7 @@
         },
         "responses": {
           "200": {
-            "description": "Новый полный occurrence/блок и planState",
+            "description": "Новый полный occurrence/блок и planState Только historical replay может вернуть точный LegacyD1 body; свежий результат всегда C1. Клиент обязательно перечитывает состояние после replay.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/CacheControl"
@@ -1753,7 +1764,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OccurrenceResponse"
+                  "$ref": "#/components/schemas/OccurrenceMutationResponse"
                 },
                 "examples": {
                   "example": {
@@ -1802,10 +1813,488 @@
                           "fixed": false,
                           "serverVersion": "block_a1"
                         },
-                        "serverVersion": "occ_a2"
+                        "serverVersion": "occ_a2",
+                        "completionStatus": "incomplete",
+                        "completion": null
                       },
                       "planState": {
                         "planningInputRevision": "input_a5",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error428"
+          }
+        }
+      }
+    },
+    "/occurrences/{id}/completion": {
+      "post": {
+        "operationId": "completeOccurrence",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Отметить конкретное occurrence выполненным",
+        "description": "C1-01–05 ACCEPTED 13.10.2026. Ручная аттестация полного fixedWork N, а не измерение времени. Закрытый DTO -> ownership target -> If-Match -> active state в одном per-user guard. Missing If-Match ->428, stale ->412 до already-completed. При отсутствии active создаётся новый Completion UUID/UTC timestamp/context {logicalDate,sourceDefinitionVersion,constraintsSnapshot}; увеличиваются только occurrence.serverVersion/planningInputRevision. При active возвращается канонический факт без bumps. После прежнего reopen создаётся новый id; revoked row/context не удаляются/не реактивируются. Никаких WorkSession/usefulSeconds. Block/start/end/fixed/version и scheduleVersion сохраняются; блок продолжает занимать время, в том числе в будущем. Complete без блока/с прошлой или будущей logicalDate допустим, completedAt не валидируется как placement availability. Другие occurrence/definition не меняются. Authentication/antiforgery проверяются каждый раз. Per-user opId fingerprint method+normalized resolved path+все query+If-Match+точные body values. Идентичный opId сначала воспроизводит исходные status/body/ETag/revisions без проверки сегодняшней версии и без изменений; changed fingerprint ->409 idempotencyMismatch. Финальный предметный result/error атомарно сохраняется под UserPlanState guard; 400/404/409/412/428 не повышают версии, 401/403/transport/invalid JSON/opId не сохраняются. После любого позднего replay клиент ACK подтверждает, затем authoritative GET/страницы/calendar refresh; старое тело в кэш не применяет.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteOccurrenceRequest"
+              },
+              "examples": {
+                "request": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000010"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Отмеченное occurrence или тот же canonical active при logical no-op; новая операция result сохранена, блок/schedule неизменны.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceResponse"
+                },
+                "examples": {
+                  "created": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 0,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a3",
+                        "completionStatus": "completed",
+                        "completion": {
+                          "id": "70000000-0000-4000-8000-000000000010",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "completedAt": "2026-10-13T12:34:56.123Z",
+                          "revokedAt": null,
+                          "source": "manual",
+                          "serverVersion": "completion_a1"
+                        }
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a6",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  },
+                  "canonicalActive": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 0,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a3",
+                        "completionStatus": "completed",
+                        "completion": {
+                          "id": "70000000-0000-4000-8000-000000000010",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "completedAt": "2026-10-13T12:34:56.123Z",
+                          "revokedAt": null,
+                          "source": "manual",
+                          "serverVersion": "completion_a1"
+                        }
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a6",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  },
+                  "newFactAfterReopen": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 0,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a5",
+                        "completionStatus": "completed",
+                        "completion": {
+                          "id": "70000000-0000-4000-8000-000000000011",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "completedAt": "2026-10-13T12:45:01.456Z",
+                          "revokedAt": null,
+                          "source": "manual",
+                          "serverVersion": "completion_b1"
+                        }
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a8",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error412"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error428"
+          }
+        }
+      }
+    },
+    "/occurrences/{id}/completion/reopen": {
+      "post": {
+        "operationId": "reopenOccurrence",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Снять строго указанную отметку выполнения",
+        "description": "C1 targeted cancellation. Закрытый DTO -> ownership occurrence -> If-Match (сначала428/412) -> lookup completionId только owner+этого occurrence -> active state под тем же guard. Отсутствующий/чужой/другой occurrence Completion ->404 referenceNotFound. Текущий active id отменяется ровно один раз: revokedAt server UTC/version факта, occurrence.serverVersion/planningInputRevision увеличиваются; active=null/remaining=N текущего неизменённого snapshot. Если этот id уже revoked и нового active нет —200 текущего incomplete состояния без новых timestamp/bumps, без отката последующих D1 правок. Если другой active появился —409 completionMismatch с currentOccurrence/currentServerVersion/ETag; новый факт не отменяется. Block/version/schedule не меняются; после reopen обычные D1 snapshot/placement guards, фиксация блока не снимается. CompletedAt/id/source/context истории неизменны. Source/часы клиента не используются, CHECK revokedAt>=completedAt не вводится. Complete A -> reopen R(A) -> complete B: identical late R только старый ACK; new op со старой базой412; new op с текущей базой и A ->409. Для отмены B нужен новый явный intent/opId, B.id и актуальный ETag; target нельзя автоматически подменять. Authentication/antiforgery проверяются каждый раз. Per-user opId fingerprint method+normalized resolved path+все query+If-Match+точные body values. Идентичный opId сначала воспроизводит исходные status/body/ETag/revisions без проверки сегодняшней версии и без изменений; changed fingerprint ->409 idempotencyMismatch. Финальный предметный result/error атомарно сохраняется под UserPlanState guard; 400/404/409/412/428 не повышают версии, 401/403/transport/invalid JSON/opId не сохраняются. После любого позднего replay клиент ACK подтверждает, затем authoritative GET/страницы/calendar refresh; старое тело в кэш не применяет.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "$ref": "#/components/parameters/Antiforgery"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenOccurrenceRequest"
+              },
+              "examples": {
+                "request": {
+                  "value": {
+                    "opId": "60000000-0000-4000-8000-000000000011",
+                    "completionId": "70000000-0000-4000-8000-000000000010"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Текущее incomplete occurrence после отмены или безопасного already-revoked no-op; сохранённый блок и N без изменений.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/CorrelationId"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/Replay"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceResponse"
+                },
+                "examples": {
+                  "revoked": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 90,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a4",
+                        "completionStatus": "incomplete",
+                        "completion": null
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a7",
+                        "scheduleVersion": "schedule_a1"
+                      }
+                    }
+                  },
+                  "alreadyRevoked": {
+                    "value": {
+                      "occurrence": {
+                        "id": "40000000-0000-4000-8000-000000000001",
+                        "definitionId": "30000000-0000-4000-8000-000000000001",
+                        "logicalDate": "2026-10-12",
+                        "sourceDefinitionVersion": "def_a1",
+                        "constraintsSnapshot": {
+                          "durationPolicy": {
+                            "mode": "fixedWork",
+                            "requiredWorkMinutes": 90
+                          },
+                          "splitAllowed": false,
+                          "mobilityPolicy": "movable",
+                          "availabilityRules": {
+                            "timezone": "Europe/Moscow",
+                            "windows": [
+                              {
+                                "daysOfWeek": [
+                                  "monday",
+                                  "tuesday",
+                                  "wednesday",
+                                  "thursday",
+                                  "friday"
+                                ],
+                                "startLocalTime": "18:00",
+                                "endLocalTime": "22:00",
+                                "endDayOffset": 0
+                              }
+                            ],
+                            "dateExceptions": []
+                          },
+                          "placeId": "10000000-0000-4000-8000-000000000001",
+                          "requiredRestMinutes": 0
+                        },
+                        "remainingWorkMinutes": 90,
+                        "placementStatus": "planned",
+                        "calendarBlock": {
+                          "id": "50000000-0000-4000-8000-000000000001",
+                          "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                          "kind": "task",
+                          "startInstant": "2026-10-12T15:00:00Z",
+                          "endInstant": "2026-10-12T16:30:00Z",
+                          "fixed": false,
+                          "serverVersion": "block_a1"
+                        },
+                        "serverVersion": "occ_a4",
+                        "completionStatus": "incomplete",
+                        "completion": null
+                      },
+                      "planState": {
+                        "planningInputRevision": "input_a7",
                         "scheduleVersion": "schedule_a1"
                       }
                     }
@@ -1856,7 +2345,7 @@
         "schema": {
           "$ref": "#/components/schemas/ETag"
         },
-        "description": "Текущий quoted ETag целевой сущности. Для placement — occurrence (не block/schedule); для PUT settings — settings; PUT definitions/occurrences — соответствующий ресурс. Отсутствие ->428 preconditionRequired; несовпадение ->412 staleEntity. Replay того же opId воспроизводит сохранённый результат до новой проверки текущего ETag."
+        "description": "Текущий quoted ETag целевой сущности. Для placement — occurrence (не block/schedule); для PUT settings — settings; PUT definitions/occurrences — соответствующий ресурс. Отсутствие ->428 preconditionRequired; несовпадение ->412 staleEntity. Replay того же opId воспроизводит сохранённый результат до новой проверки текущего ETag. Для complete/reopen также occurrence; у нового opId проверяется раньше already-completed/target Completion/state, а replay не переоценивает текущую версию."
       },
       "Antiforgery": {
         "name": "X-CSRF-TOKEN",
@@ -1954,6 +2443,19 @@
             "planned"
           ]
         }
+      },
+      "CompletionStatus": {
+        "name": "completionStatus",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "incomplete",
+            "completed"
+          ]
+        },
+        "description": "Фильтр текущего active факта (не число исторических отметок). Отсутствие —все. Применяется в SQL до OrderBy/Take; входит в identity/kind/filter scope cursor. Смена фильтра требует новой первой страницы."
       }
     },
     "headers": {
@@ -2054,7 +2556,7 @@
         }
       },
       "Error404": {
-        "description": "notFound для отсутствующей/чужой целевой сущности; referenceNotFound для ссылки. Ответ не раскрывает чужие данные.",
+        "description": "notFound для отсутствующей/чужой целевой сущности; referenceNotFound для ссылки. Ответ не раскрывает чужие данные. Reopen body.completionId проверяется только для owner+этого occurrence: чужой/другой occurrence/отсутствующий факт ->referenceNotFound; целевой occurrence ->notFound.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/CacheControl"
@@ -2075,7 +2577,7 @@
         }
       },
       "Error409": {
-        "description": "idUnavailable, idempotencyMismatch, staleSchedule, fixedChangeRequiresConfirmation, invalidPlacementState, placementConflict, invalidExistingPlacement. currentPlanState/currentOccurrence/conflictingBlockIds только текущего пользователя.",
+        "description": "idUnavailable, idempotencyMismatch, staleSchedule, fixedChangeRequiresConfirmation, invalidPlacementState, placementConflict, invalidExistingPlacement. currentPlanState/currentOccurrence/conflictingBlockIds только текущего пользователя. C1 occurrenceCompleted (fresh PUT/placement при active); completionMismatch (targeted старый revoked id при другом active). Эти проверки следуют после If-Match и не отменяют новый факт.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/CacheControl"
@@ -3146,7 +3648,7 @@
           "remainingWorkMinutes": {
             "type": "integer",
             "format": "int32",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 2147483647
           },
           "placementStatus": {
@@ -3168,6 +3670,23 @@
           },
           "serverVersion": {
             "$ref": "#/components/schemas/ServerVersion"
+          },
+          "completionStatus": {
+            "type": "string",
+            "enum": [
+              "incomplete",
+              "completed"
+            ]
+          },
+          "completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveCompletion"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3179,9 +3698,11 @@
           "remainingWorkMinutes",
           "placementStatus",
           "calendarBlock",
-          "serverVersion"
+          "serverVersion",
+          "completionStatus",
+          "completion"
         ],
-        "description": "sourceDefinitionVersion неизменна после копирования; ручная правка snapshot не притворяется новым копированием definition. logicalDate — ручная метка, не запрещает перенос на другой день. Без Completion remainingWorkMinutes=requiredWorkMinutes; planned iff calendarBlock!=null.",
+        "description": "C1 projection: completion=null iff incomplete, remaining=requiredWorkMinutes N; active Completion iff completed, remaining=0. Snapshot.requiredWorkMinutes и полный elapsed N существующего блока не уменьшаются. Вложенный факт соответствует этому occurrence и имеет revokedAt=null; история сохраняется отдельно. LogicalDate/sourceDefinitionVersion/snapshot/block не меняются от complete/reopen. При active PUT snapshot/logicalDate и все placement actions запрещены; после reopen обычные D1 правила. Metadata definition остаются live. planned iff calendarBlock!=null.",
         "examples": [
           {
             "id": "40000000-0000-4000-8000-000000000001",
@@ -3227,7 +3748,9 @@
               "fixed": false,
               "serverVersion": "block_a1"
             },
-            "serverVersion": "occ_a2"
+            "serverVersion": "occ_a2",
+            "completionStatus": "incomplete",
+            "completion": null
           },
           {
             "id": "40000000-0000-4000-8000-000000000001",
@@ -3265,7 +3788,179 @@
             "remainingWorkMinutes": 90,
             "placementStatus": "unplanned",
             "calendarBlock": null,
-            "serverVersion": "occ_a1"
+            "serverVersion": "occ_a1",
+            "completionStatus": "incomplete",
+            "completion": null
+          },
+          {
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionId": "30000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "sourceDefinitionVersion": "def_a1",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "remainingWorkMinutes": 0,
+            "placementStatus": "planned",
+            "calendarBlock": {
+              "id": "50000000-0000-4000-8000-000000000001",
+              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+              "kind": "task",
+              "startInstant": "2026-10-12T15:00:00Z",
+              "endInstant": "2026-10-12T16:30:00Z",
+              "fixed": false,
+              "serverVersion": "block_a1"
+            },
+            "serverVersion": "occ_a3",
+            "completionStatus": "completed",
+            "completion": {
+              "id": "70000000-0000-4000-8000-000000000010",
+              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+              "completedAt": "2026-10-13T12:34:56.123Z",
+              "revokedAt": null,
+              "source": "manual",
+              "serverVersion": "completion_a1"
+            }
+          },
+          {
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionId": "30000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "sourceDefinitionVersion": "def_a1",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "remainingWorkMinutes": 0,
+            "placementStatus": "planned",
+            "calendarBlock": {
+              "id": "50000000-0000-4000-8000-000000000001",
+              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+              "kind": "task",
+              "startInstant": "2026-10-12T15:00:00Z",
+              "endInstant": "2026-10-12T16:30:00Z",
+              "fixed": false,
+              "serverVersion": "block_a1"
+            },
+            "serverVersion": "occ_a5",
+            "completionStatus": "completed",
+            "completion": {
+              "id": "70000000-0000-4000-8000-000000000011",
+              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+              "completedAt": "2026-10-13T12:45:01.456Z",
+              "revokedAt": null,
+              "source": "manual",
+              "serverVersion": "completion_b1"
+            }
+          }
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completionStatus": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "completionStatus"
+              ]
+            },
+            "then": {
+              "properties": {
+                "completion": {
+                  "$ref": "#/components/schemas/ActiveCompletion"
+                },
+                "remainingWorkMinutes": {
+                  "const": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "completion": {
+                  "type": "null"
+                },
+                "remainingWorkMinutes": {
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "placementStatus": {
+                  "const": "planned"
+                }
+              },
+              "required": [
+                "placementStatus"
+              ]
+            },
+            "then": {
+              "properties": {
+                "calendarBlock": {
+                  "$ref": "#/components/schemas/CalendarBlock"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "calendarBlock": {
+                  "type": "null"
+                }
+              }
+            }
           }
         ]
       },
@@ -3765,10 +4460,73 @@
                 "fixed": false,
                 "serverVersion": "block_a1"
               },
-              "serverVersion": "occ_a2"
+              "serverVersion": "occ_a2",
+              "completionStatus": "incomplete",
+              "completion": null
             },
             "planState": {
               "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          },
+          {
+            "occurrence": {
+              "id": "40000000-0000-4000-8000-000000000001",
+              "definitionId": "30000000-0000-4000-8000-000000000001",
+              "logicalDate": "2026-10-12",
+              "sourceDefinitionVersion": "def_a1",
+              "constraintsSnapshot": {
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0
+              },
+              "remainingWorkMinutes": 0,
+              "placementStatus": "planned",
+              "calendarBlock": {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              },
+              "serverVersion": "occ_a3",
+              "completionStatus": "completed",
+              "completion": {
+                "id": "70000000-0000-4000-8000-000000000010",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "completedAt": "2026-10-13T12:34:56.123Z",
+                "revokedAt": null,
+                "source": "manual",
+                "serverVersion": "completion_a1"
+              }
+            },
+            "planState": {
+              "planningInputRevision": "input_a6",
               "scheduleVersion": "schedule_a1"
             }
           }
@@ -3977,7 +4735,9 @@
                   "fixed": false,
                   "serverVersion": "block_a1"
                 },
-                "serverVersion": "occ_a2"
+                "serverVersion": "occ_a2",
+                "completionStatus": "incomplete",
+                "completion": null
               }
             ],
             "definitions": [
@@ -4154,7 +4914,9 @@
               "ambiguousAvailabilityBoundary",
               "invalidExistingPlacement",
               "rangeTooLarge",
-              "invalidCursor"
+              "invalidCursor",
+              "occurrenceCompleted",
+              "completionMismatch"
             ]
           },
           "correlationId": {
@@ -4184,7 +4946,15 @@
             "$ref": "#/components/schemas/TaskDefinition"
           },
           "currentOccurrence": {
-            "$ref": "#/components/schemas/TaskOccurrence"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TaskOccurrence"
+              },
+              {
+                "$ref": "#/components/schemas/TaskOccurrenceLegacyD1"
+              }
+            ],
+            "description": "Свежая ошибка содержит C1. LegacyD1 допустима только в точном сохранённом replay при Idempotency-Replayed=true; клиент её в кэш не применяет, обязательно refresh."
           },
           "conflictingBlockIds": {
             "type": "array",
@@ -4208,7 +4978,7 @@
           "code",
           "correlationId"
         ],
-        "description": "application/problem+json. Только текущий владелец; 404 не различает чужой/отсутствующий id. Не отражать пароли/токены/личные тексты в detail или логах.",
+        "description": "application/problem+json. Только текущий владелец; 404 не различает чужой/отсутствующий id. Не отражать пароли/токены/личные тексты в detail или логах. C1: occurrenceCompleted блокирует PUT/placement при active после If-Match; completionMismatch защищает targeted reopen старого факта при наличии нового active. Current occurrence свежих ошибок имеет C1 projection; legacy поле допускается только для historical replay.",
         "examples": [
           {
             "type": "about:blank",
@@ -4276,8 +5046,436 @@
                 "fixed": false,
                 "serverVersion": "block_a1"
               },
-              "serverVersion": "occ_a2"
+              "serverVersion": "occ_a2",
+              "completionStatus": "incomplete",
+              "completion": null
             }
+          },
+          {
+            "type": "about:blank",
+            "title": "Текущая отметка изменилась",
+            "status": 409,
+            "detail": "Перечитайте выполнение; отмена другого активного факта требует нового явного действия.",
+            "instance": "/api/v1/occurrences/40000000-0000-4000-8000-000000000001/completion/reopen",
+            "code": "completionMismatch",
+            "correlationId": "request-example-c1",
+            "currentServerVersion": "occ_a5",
+            "currentOccurrence": {
+              "id": "40000000-0000-4000-8000-000000000001",
+              "definitionId": "30000000-0000-4000-8000-000000000001",
+              "logicalDate": "2026-10-12",
+              "sourceDefinitionVersion": "def_a1",
+              "constraintsSnapshot": {
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0
+              },
+              "remainingWorkMinutes": 0,
+              "placementStatus": "planned",
+              "calendarBlock": {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              },
+              "serverVersion": "occ_a5",
+              "completionStatus": "completed",
+              "completion": {
+                "id": "70000000-0000-4000-8000-000000000011",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "completedAt": "2026-10-13T12:45:01.456Z",
+                "revokedAt": null,
+                "source": "manual",
+                "serverVersion": "completion_b1"
+              }
+            }
+          }
+        ]
+      },
+      "TaskOccurrenceLegacyD1": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "definitionId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "logicalDate": {
+            "$ref": "#/components/schemas/LocalDate"
+          },
+          "sourceDefinitionVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          },
+          "constraintsSnapshot": {
+            "$ref": "#/components/schemas/ConstraintsSnapshot"
+          },
+          "remainingWorkMinutes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "placementStatus": {
+            "type": "string",
+            "enum": [
+              "unplanned",
+              "planned"
+            ]
+          },
+          "calendarBlock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CalendarBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "definitionId",
+          "logicalDate",
+          "sourceDefinitionVersion",
+          "constraintsSnapshot",
+          "remainingWorkMinutes",
+          "placementStatus",
+          "calendarBlock",
+          "serverVersion"
+        ],
+        "description": "sourceDefinitionVersion неизменна после копирования; ручная правка snapshot не притворяется новым копированием definition. logicalDate — ручная метка, не запрещает перенос на другой день. Без Completion remainingWorkMinutes=requiredWorkMinutes; planned iff calendarBlock!=null.",
+        "examples": [
+          {
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionId": "30000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "sourceDefinitionVersion": "def_a1",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "remainingWorkMinutes": 90,
+            "placementStatus": "planned",
+            "calendarBlock": {
+              "id": "50000000-0000-4000-8000-000000000001",
+              "occurrenceId": "40000000-0000-4000-8000-000000000001",
+              "kind": "task",
+              "startInstant": "2026-10-12T15:00:00Z",
+              "endInstant": "2026-10-12T16:30:00Z",
+              "fixed": false,
+              "serverVersion": "block_a1"
+            },
+            "serverVersion": "occ_a2"
+          },
+          {
+            "id": "40000000-0000-4000-8000-000000000001",
+            "definitionId": "30000000-0000-4000-8000-000000000001",
+            "logicalDate": "2026-10-12",
+            "sourceDefinitionVersion": "def_a1",
+            "constraintsSnapshot": {
+              "durationPolicy": {
+                "mode": "fixedWork",
+                "requiredWorkMinutes": 90
+              },
+              "splitAllowed": false,
+              "mobilityPolicy": "movable",
+              "availabilityRules": {
+                "timezone": "Europe/Moscow",
+                "windows": [
+                  {
+                    "daysOfWeek": [
+                      "monday",
+                      "tuesday",
+                      "wednesday",
+                      "thursday",
+                      "friday"
+                    ],
+                    "startLocalTime": "18:00",
+                    "endLocalTime": "22:00",
+                    "endDayOffset": 0
+                  }
+                ],
+                "dateExceptions": []
+              },
+              "placeId": "10000000-0000-4000-8000-000000000001",
+              "requiredRestMinutes": 0
+            },
+            "remainingWorkMinutes": 90,
+            "placementStatus": "unplanned",
+            "calendarBlock": null,
+            "serverVersion": "occ_a1"
+          }
+        ]
+      },
+      "OccurrenceResponseLegacyD1": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "occurrence": {
+            "$ref": "#/components/schemas/TaskOccurrenceLegacyD1"
+          },
+          "planState": {
+            "$ref": "#/components/schemas/PlanState"
+          }
+        },
+        "required": [
+          "occurrence",
+          "planState"
+        ],
+        "examples": [
+          {
+            "occurrence": {
+              "id": "40000000-0000-4000-8000-000000000001",
+              "definitionId": "30000000-0000-4000-8000-000000000001",
+              "logicalDate": "2026-10-12",
+              "sourceDefinitionVersion": "def_a1",
+              "constraintsSnapshot": {
+                "durationPolicy": {
+                  "mode": "fixedWork",
+                  "requiredWorkMinutes": 90
+                },
+                "splitAllowed": false,
+                "mobilityPolicy": "movable",
+                "availabilityRules": {
+                  "timezone": "Europe/Moscow",
+                  "windows": [
+                    {
+                      "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday"
+                      ],
+                      "startLocalTime": "18:00",
+                      "endLocalTime": "22:00",
+                      "endDayOffset": 0
+                    }
+                  ],
+                  "dateExceptions": []
+                },
+                "placeId": "10000000-0000-4000-8000-000000000001",
+                "requiredRestMinutes": 0
+              },
+              "remainingWorkMinutes": 90,
+              "placementStatus": "planned",
+              "calendarBlock": {
+                "id": "50000000-0000-4000-8000-000000000001",
+                "occurrenceId": "40000000-0000-4000-8000-000000000001",
+                "kind": "task",
+                "startInstant": "2026-10-12T15:00:00Z",
+                "endInstant": "2026-10-12T16:30:00Z",
+                "fixed": false,
+                "serverVersion": "block_a1"
+              },
+              "serverVersion": "occ_a2"
+            },
+            "planState": {
+              "planningInputRevision": "input_a5",
+              "scheduleVersion": "schedule_a1"
+            }
+          }
+        ]
+      },
+      "OccurrenceMutationResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/OccurrenceResponse"
+          },
+          {
+            "$ref": "#/components/schemas/OccurrenceResponseLegacyD1"
+          }
+        ],
+        "description": "Свежий результат всегда OccurrenceResponse C1. Только при Idempotency-Replayed=true ранее сохранённая D1 операция может вернуть точную закрытую LegacyD1 ветвь; body/status/ETag не переписываются. Клиент подтверждает доставку и перечитывает current GET, не применяя старое состояние."
+      },
+      "CompletionInstant": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}Z$",
+        "description": "UTC время принятия сервером ручного действия, ровно три цифры миллисекунд. Не logicalDate, не граница блока и не измеренное полезное время. Отдельный тип от минутного D1 UtcInstant.",
+        "examples": [
+          "2026-10-13T12:34:56.123Z"
+        ]
+      },
+      "Completion": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "occurrenceId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/CompletionInstant"
+          },
+          "revokedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompletionInstant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string",
+            "const": "manual"
+          },
+          "serverVersion": {
+            "$ref": "#/components/schemas/ServerVersion"
+          }
+        },
+        "required": [
+          "id",
+          "occurrenceId",
+          "completedAt",
+          "revokedAt",
+          "source",
+          "serverVersion"
+        ],
+        "description": "Факт ручного подтверждения полного fixedWork. completedAt/id/source и внутренний context неизменны; отмена один раз задаёт revokedAt и новую fact version. Revoked история сохраняется в БД, не возвращается как текущий active. Нет usefulSeconds/фактических минут; serverVersion opaque. Timestamp не выбирает победителя, CHECK revokedAt>=completedAt не предполагается.",
+        "examples": [
+          {
+            "id": "70000000-0000-4000-8000-000000000010",
+            "occurrenceId": "40000000-0000-4000-8000-000000000001",
+            "completedAt": "2026-10-13T12:34:56.123Z",
+            "revokedAt": null,
+            "source": "manual",
+            "serverVersion": "completion_a1"
+          },
+          {
+            "id": "70000000-0000-4000-8000-000000000010",
+            "occurrenceId": "40000000-0000-4000-8000-000000000001",
+            "completedAt": "2026-10-13T12:34:56.123Z",
+            "revokedAt": "2026-10-13T12:40:00.001Z",
+            "source": "manual",
+            "serverVersion": "completion_a2"
+          }
+        ]
+      },
+      "ActiveCompletion": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Completion"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "revokedAt": {
+                "type": "null"
+              }
+            }
+          }
+        ],
+        "description": "Текущий факт в occurrence projection: revokedAt всегда null. Исторические revoked строки не выдаются вместо активного.",
+        "examples": [
+          {
+            "id": "70000000-0000-4000-8000-000000000010",
+            "occurrenceId": "40000000-0000-4000-8000-000000000001",
+            "completedAt": "2026-10-13T12:34:56.123Z",
+            "revokedAt": null,
+            "source": "manual",
+            "serverVersion": "completion_a1"
+          }
+        ]
+      },
+      "CompleteOccurrenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        },
+        "required": [
+          "opId"
+        ],
+        "description": "Ручная отметка полного объёма occurrence. UUID факта/время/источник/owner выпускает сервер; клиент не задаёт Completion id, минуты, logicalDate, allowFixedChange, baseScheduleVersion или факт частичной работы.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000010"
+          }
+        ]
+      },
+      "ReopenOccurrenceRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "opId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "completionId": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        },
+        "required": [
+          "opId",
+          "completionId"
+        ],
+        "description": "Снять строго указанную текущую отметку. completionId — наблюдавшийся active id. Никогда не подменять старый id новым active; другой owner/occurrence/отсутствующий id ->404 referenceNotFound после проверки occurrence If-Match.",
+        "examples": [
+          {
+            "opId": "60000000-0000-4000-8000-000000000011",
+            "completionId": "70000000-0000-4000-8000-000000000010"
           }
         ]
       }
@@ -4288,6 +5486,11 @@
     "D1-02",
     "D1-03",
     "D1-04",
-    "D1-05"
+    "D1-05",
+    "C1-01",
+    "C1-02",
+    "C1-03",
+    "C1-04",
+    "C1-05"
   ]
 }

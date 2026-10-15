@@ -212,6 +212,48 @@ namespace Vibe.Api.Data.Migrations
                     b.ToTable("Categories", (string)null);
                 });
 
+            modelBuilder.Entity("Vibe.Api.Data.CompletionRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OccurrenceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OccurrenceSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("UserId", "Id");
+
+                    b.HasIndex("UserId", "OccurrenceId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Completions_User_Occurrence_Active")
+                        .HasFilter("\"RevokedAtUtc\" IS NULL");
+
+                    b.ToTable("Completions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Completion_ManualSource", "\"Source\" = 'manual'");
+                        });
+                });
+
             modelBuilder.Entity("Vibe.Api.Data.DefinitionRow", b =>
                 {
                     b.Property<string>("UserId")
@@ -502,6 +544,15 @@ namespace Vibe.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Vibe.Api.Data.CompletionRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.OccurrenceRow", null)
+                        .WithMany("Completions")
+                        .HasForeignKey("UserId", "OccurrenceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Vibe.Api.Data.DefinitionRow", b =>
                 {
                     b.HasOne("Vibe.Api.Data.CategoryRow", null)
@@ -570,6 +621,8 @@ namespace Vibe.Api.Data.Migrations
             modelBuilder.Entity("Vibe.Api.Data.OccurrenceRow", b =>
                 {
                     b.Navigation("Block");
+
+                    b.Navigation("Completions");
                 });
 
             modelBuilder.Entity("Vibe.Api.Data.SettingsRow", b =>

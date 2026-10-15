@@ -29,6 +29,7 @@ if (builder.Environment.IsDevelopment())
 }
 builder.Services.AddDbContext<VibeDb>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("Vibe") ?? throw new InvalidOperationException("PostgreSQL configuration is required.")));
 builder.Services.AddScoped<D1Service>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddIdentity<VibeUser, IdentityRole>(options =>
 {
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(builder.Configuration.GetValue("Auth:LockoutMinutes", 15));
@@ -97,6 +98,13 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 app.Use(async (ctx, next) =>
 {
     if (!ctx.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)) { await next(ctx); return; }
+    // OnStarting callbacks run in reverse registration order. Register before authentication
+    // so this contract header is applied after cookie renewal or rejection sets its own headers.
+    ctx.Response.OnStarting(static state =>
+    {
+        ((HttpResponse)state).Headers.CacheControl = "no-store";
+        return Task.CompletedTask;
+    }, ctx.Response);
     ctx.Response.Headers.CacheControl = "no-store";
     ctx.Response.Headers["X-Correlation-ID"] = ctx.TraceIdentifier;
     try
@@ -169,6 +177,8 @@ domain.MapGet("/occurrences", (HttpContext c, D1Service d) => d.Read(c, "occurre
 domain.MapGet("/occurrences/{id}", (HttpContext c, D1Service d, string id) => d.Read(c, "occurrence", id));
 domain.MapPut("/occurrences/{id}", (HttpContext c, D1Service d, string id) => d.Mutate(c, "updateOccurrence", id));
 domain.MapPost("/occurrences/{id}/placement", (HttpContext c, D1Service d, string id) => d.Mutate(c, "placement", id));
+domain.MapPost("/occurrences/{id}/completion", (HttpContext c, D1Service d, string id) => d.Mutate(c, "complete", id));
+domain.MapPost("/occurrences/{id}/completion/reopen", (HttpContext c, D1Service d, string id) => d.Mutate(c, "reopen", id));
 domain.MapGet("/calendar", (HttpContext c, D1Service d) => d.Read(c, "calendar"));
 app.MapFallback("/api/{**path}", (HttpContext c) => new ApiReply(404, Wire.Json(Wire.Problem(c, new DomainError(404, "notFound")))).ExecuteAsync(c));
 app.Run();

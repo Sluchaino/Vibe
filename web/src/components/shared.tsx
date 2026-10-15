@@ -4,7 +4,7 @@ import type { ProblemDetails } from '../api/types'
 import { captureCommand, type Command, type PendingCommand } from '../lib/operations'
 import { identityState } from '../state/session'
 import { openDraft, rebaseDraft, type VersionedDraft } from '../lib/drafts'
-import { CommandLifecycle, type CurrentCommandGuard } from '../lib/command-lifecycle'
+import { CommandLifecycle, settleAcknowledgement, type CurrentCommandGuard } from '../lib/command-lifecycle'
 
 export function useDraft<T>(userId: string, key: string, initial: T) {
   const [draft, setState] = useState<T>(() => identityState.getDraft<T>(userId, key) ?? structuredClone(initial))
@@ -51,15 +51,13 @@ export function useCommand(userId: string, key: string, afterSuccess: (current: 
       lifecycle.end(ticket)
       return false
     }
-    const acknowledged = lifecycle.clearPending(ticket)
-    if (acknowledged && current()) {
-      setPending(null)
-      try { await afterSuccess(current) } catch { if (current()) setError(new Error('Изменения сохранены. Не удалось обновить отображение; нажмите «Обновить».')) }
+    const result = await settleAcknowledgement(lifecycle, ticket, afterSuccess, () => setPending(null))
+    if (result.current) {
+      if (result.refreshError) setError(new Error('Изменения сохранены. Не удалось обновить отображение; нажмите «Обновить». До обновления показана прежняя редакция.'))
+      setBusy(false)
     }
-    const stillCurrent = current()
-    if (stillCurrent) setBusy(false)
     lifecycle.end(ticket)
-    return acknowledged && stillCurrent
+    return result.success
   }
   async function submit(command: Command) {
     if (lifecycle.inFlight) return false
@@ -71,6 +69,8 @@ export function useCommand(userId: string, key: string, afterSuccess: (current: 
   return { pending, busy, error, setError, submit, retry: () => pending ? deliver(pending) : Promise.resolve(false), problem: error instanceof ApiError ? error.problem : undefined }
 }
 const errorLabels: Record<string, string> = {
+  occurrenceCompleted: 'Выполнение уже отмечено завершённым. Перечитайте его состояние; для изменения сначала снимите отметку.',
+  completionMismatch: 'Активная отметка изменилась. Старое намерение отмены сохранено и не применяется к новой отметке. Обновите состояние и выберите новое действие явно.',
   staleEntity: 'Эта запись изменилась в другой вкладке. Ваш ввод сохранён.',
   staleDefinition: 'Описание задачи изменилось. Проверьте новые условия перед созданием выполнения.',
   staleSchedule: 'Расписание изменилось. Обновите календарь перед повторным действием.',

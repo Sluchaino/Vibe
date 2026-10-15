@@ -110,38 +110,46 @@ public static class Wire
     }
     static bool Matches(JsonNode? n, JsonNode schema)
     {
-        if (schema["$ref"] is JsonNode reference) return Matches(n, Schemas[reference.GetValue<string>().Split('/').Last()]!);
-        if (schema["anyOf"] is JsonArray any) return any.Any(s => Matches(n, s!));
-        if (schema["oneOf"] is JsonArray one) return one.Count(s => Matches(n, s!)) == 1;
-        if (schema["const"] is JsonNode constant && Canonical(n) != Canonical(constant)) return false;
+        if (schema is JsonValue booleanSchema && booleanSchema.TryGetValue<bool>(out bool allowed)) return allowed;
+        if (schema["$ref"] is JsonNode reference && !Matches(n, Schemas[reference.GetValue<string>().Split('/').Last()]!)) return false;
+        if (schema["allOf"] is JsonArray all && !all.All(s => Matches(n, s!))) return false;
+        if (schema["anyOf"] is JsonArray any && !any.Any(s => Matches(n, s!))) return false;
+        if (schema["oneOf"] is JsonArray one && one.Count(s => Matches(n, s!)) != 1) return false;
+        if (schema["not"] is JsonNode excluded && Matches(n, excluded)) return false;
+        if (schema["if"] is JsonNode condition)
+        {
+            var branch = schema[Matches(n, condition) ? "then" : "else"];
+            if (branch is not null && !Matches(n, branch)) return false;
+        }
+        if (schema.AsObject().ContainsKey("const") && Canonical(n) != Canonical(schema["const"])) return false;
         if (schema["enum"] is JsonArray choices && !choices.Any(s => Canonical(n) == Canonical(s))) return false;
         var type = schema["type"]?.GetValue<string>();
         if (type == "null") return n is null;
-        if (n is null) return false;
-        if (type == "object")
+        if (n is null) return type is null;
+        if ((type == "object" && n is not JsonObject) || (type == "array" && n is not JsonArray) || ((type is "string" or "boolean" or "integer") && n is not JsonValue)) return false;
+        if (n is JsonObject o)
         {
-            if (n is not JsonObject o) return false;
             if (schema["required"] is JsonArray required && required.Any(k => !o.ContainsKey(k!.GetValue<string>()))) return false;
             var props = schema["properties"]?.AsObject();
             foreach (var (key, value) in o)
             {
                 if (props?.TryGetPropertyValue(key, out var child) == true) { if (!Matches(value, child!)) return false; }
                 else if (schema["additionalProperties"]?.ToJsonString() == "false") return false;
+                else if (schema["additionalProperties"] is JsonObject additional && !Matches(value, additional)) return false;
             }
             return true;
         }
-        if (type == "array")
+        if (n is JsonArray a)
         {
-            if (n is not JsonArray a) return false;
             if (schema["minItems"] is JsonNode min && a.Count < min.GetValue<int>()) return false;
             if (schema["maxItems"] is JsonNode max && a.Count > max.GetValue<int>()) return false;
             if (schema["uniqueItems"]?.ToJsonString() == "true" && a.Select(x => Canonical(x)).Distinct().Count() != a.Count) return false;
-            return a.All(x => Matches(x, schema["items"]!));
+            return schema["items"] is not JsonNode items || a.All(x => Matches(x, items));
         }
         if (n is not JsonValue v) return false;
-        if (type == "string")
+        if (v.TryGetValue<string>(out var s))
         {
-            if (!v.TryGetValue<string>(out var s)) return false;
+            if (type is not (null or "string")) return false;
             int length = s.EnumerateRunes().Count();
             if (schema["minLength"] is JsonNode min && length < min.GetValue<int>()) return false;
             if (schema["maxLength"] is JsonNode max && length > max.GetValue<int>()) return false;
@@ -150,15 +158,15 @@ public static class Wire
             if (schema["format"]?.GetValue<string>() == "date" && !DateOnly.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) return false;
             return true;
         }
-        if (type == "boolean") return v.TryGetValue<bool>(out _);
-        if (type == "integer")
+        if (v.TryGetValue<bool>(out _)) return type is null or "boolean";
+        if (ExactNumber.TryRead(v, out var exact))
         {
-            if (!ExactNumber.TryRead(v, out var exact) || !exact.TryInt32(out int number)) return false;
+            if (type is not (null or "integer") || !exact.TryInt32(out int number)) return false;
             if (schema["minimum"] is JsonNode min && number < min.GetValue<int>()) return false;
             if (schema["maximum"] is JsonNode max && number > max.GetValue<int>()) return false;
             return true;
         }
-        return true;
+        return type is null;
     }
     // Exact decimal normalization: never passes numeric tokens through a floating-point value.
     public static string Canonical(JsonNode? node)

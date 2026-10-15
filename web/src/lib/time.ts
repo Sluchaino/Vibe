@@ -93,3 +93,6 @@ export function dateLabel(date: string, short = false) {
 export function instantLabel(instant: string, timezone: string) {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset' }).format(new Date(instant))
 }
+export function completionTimeLabel(instant: string, timezone: string) {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset' }).format(new Date(instant))
+}

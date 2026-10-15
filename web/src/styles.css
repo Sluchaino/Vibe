@@ -94,6 +94,15 @@ summary { cursor: pointer; color: var(--green); line-height: 1.5; font-weight: 6
 .occurrence-card h3 { overflow-wrap: anywhere; }
 .status-pill { display: inline-flex; margin-top: 10px; padding: 4px 9px; border: 1px solid #d8dfcd; border-radius: 20px; font-size: 11px; color: #586a47; background: #f1f4e9; }
 .block-summary { color: var(--green); font-size: 13px; margin-top: 10px; }
+.occurrence-card--done { background: #f2f7ed; border-color: #bad1ab; }
+.status-pill--done { background: #deecd4; color: #245039; border-color: #b2c99f; font-weight: 600; }
+.completion-time { color: #4c6345; font-size: 12px; margin-top: 9px; }
+.completion-state { padding: 18px; margin-bottom: 20px; border: 1px solid #d3dcc9; border-radius: 12px; background: #f3f5ed; }
+.completion-state strong { font-size: 18px; }
+.completion-state p { margin-top: 8px; color: #4d6645; font-size: 13px; }
+.completion-state--done { background: #e7f1de; border-color: #b6cfa2; }
+.occurrence-filters { max-width: 280px; margin-top: 22px; }
+.calendar-event--done { background: #e0ecd5; border-color: #a8c391; border-left-color: #367241; }
 .empty-state { padding: 34px 24px; text-align: center; color: var(--muted); border: 1px dashed #cfd8c5; border-radius: 14px; margin: 20px 0; background: #f7f9f1; }
 .empty-state p { margin: 10px 0 16px; }
 .load-more { display: block; margin: 20px auto 0; }

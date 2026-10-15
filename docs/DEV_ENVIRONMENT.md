@@ -41,3 +41,11 @@ Web: https://localhost:5173, preview: https://localhost:4173, API: https://local
 12.10.2026 владелец отдельно разрешил доверие конкретному .NET сертификату CN=localhost (SHA-256 EF:EF:4D:42:D2:0D:45:BF:A4:20:CC:34:18:B9:10:56:A6:EA:E6:FD:73:8A:30:34:2A:C2:C0:D0:79:38:05:0D, срок до12.10.2027). Выполнены dotnet dev-certs https --trust и --check --trust; глобальные настройки Codex не менялись. На другом компьютере доверие добавляет владелец отдельно после подготовки.
 
 После перемещения папки проекта абсолютные LocalHttps.CertificatePath/KeyPath в private config должны соответствовать новой .tools/certs. Подготовка сообщает несовпадение, не перезаписывая конфигурацию. Сохраняйте secrets и Docker volume; не сбрасывайте данные ради исправления пути.
+
+## Восстановление Docker 13.10.2026
+
+Docker Desktop 4.89.0 не запускался: Windows возвращала error 1920 при rename служебных sailor-ingest.sock и engine.sock. После штатного force-stop проверены остановка процессов и точные каталоги. Docker/run и docker-secrets-engine сохранены под отдельными именами с суффиксом vibe-recovery-20261013; вместо них созданы новые runtime-каталоги. Файлы sockets, резервные каталоги, WSL disks и persistent volume не удалялись; factory reset/WSL unregister/переустановка/изменение ACL не выполнялись.
+
+После перезапуска: Engine 29.7.2 отвечает; compose запустил PostgreSQL Healthy; check_dev_environment.ps1 -RequireDatabase PASS. Сохранён прежний vibe-d1_pgdata (created 2026-10-12T16:39:42Z), в рабочей базе проверены 2 пользователя, 1 задача, 1 выполнение и 1 календарный блок. Схема Completion и API этим восстановлением не менялись.
+
+Метод основан на наблюдениях в [официальном трекере Docker, issue554](https://github.com/docker/desktop-feedback/issues/554), а не на гарантии исправления причины в Docker. Восстановление выполнено координатором только для runtime-каталогов после проверки путей и содержимого. Ошибка fsutil на AF_UNIX сама по себе не доказывает повреждение диска. При повторении сначала проверить точную ошибку и состояние процессов; не перемещать весь Docker и не сбрасывать volume с данными Vibe.

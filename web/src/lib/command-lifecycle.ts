@@ -34,6 +34,7 @@ export class CommandLifecycle {
     const stored = this.stored()
     return this.mounted && this.active === ticket && this.sequence === ticket.sequence && this.state.epoch === ticket.epoch && this.state.userId === this.userId && (!stored || stored.opId === ticket.command.opId)
   }
+  ownsIdentity(ticket: CommandTicket) { return this.state.epoch === ticket.epoch && this.state.userId === this.userId }
   clearPending(ticket: CommandTicket) {
     if (this.stored()?.opId !== ticket.command.opId) return false
     this.state.clearDraft(this.userId, this.key)
@@ -53,4 +54,15 @@ export async function afterRefresh(current: CurrentCommandGuard, before: () => v
   before()
   await refresh()
   if (current()) after?.()
+}
+export async function settleAcknowledgement(lifecycle: CommandLifecycle, ticket: CommandTicket, afterSuccess: (current: CurrentCommandGuard) => Promise<void> | void, onAcknowledged?: () => void) {
+  const acknowledged = lifecycle.clearPending(ticket)
+  const current = () => lifecycle.current(ticket)
+  let refreshed = false
+  let refreshError: Error | null = null
+  if (lifecycle.ownsIdentity(ticket)) {
+    if (acknowledged && current()) onAcknowledged?.()
+    try { await afterSuccess(current); refreshed = lifecycle.ownsIdentity(ticket) } catch (error) { refreshError = error instanceof Error ? error : new Error('Не удалось обновить данные.') }
+  }
+  return { success: acknowledged && refreshed && current(), current: current(), refreshError }
 }

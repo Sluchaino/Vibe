@@ -14,9 +14,16 @@ namespace Vibe.Api.Tests;
 public sealed class TestClock : TimeProvider
 {
     long ticks;
-    public override DateTimeOffset GetUtcNow() => DateTimeOffset.UtcNow.AddTicks(Interlocked.Read(ref ticks));
+    long frozen;
+    int fixedClock;
+    public override DateTimeOffset GetUtcNow() => (Volatile.Read(ref fixedClock) == 1 ? new DateTimeOffset(Interlocked.Read(ref frozen), TimeSpan.Zero) : DateTimeOffset.UtcNow).AddTicks(Interlocked.Read(ref ticks));
     public void Advance(TimeSpan value) => Interlocked.Add(ref ticks, value.Ticks);
-    public void Reset() => Interlocked.Exchange(ref ticks, 0);
+    public void SetUtcNow(DateTimeOffset value)
+    {
+        Interlocked.Exchange(ref frozen, value.UtcTicks); Interlocked.Exchange(ref ticks, 0);
+        Volatile.Write(ref fixedClock, 1);
+    }
+    public void Reset() { Interlocked.Exchange(ref ticks, 0); Volatile.Write(ref fixedClock, 0); }
 }
 public sealed class TestApp(string connection, TestClock clock) : WebApplicationFactory<Program>
 {
@@ -34,7 +41,11 @@ public sealed class TestApp(string connection, TestClock clock) : WebApplication
             ["Testing:SeedUsers:2:Password"] = PostgresFixture.Password,
             ["Auth:SessionHours"] = "24", ["Auth:MaxFailedAccessAttempts"] = "5", ["Auth:LockoutMinutes"] = "15"
         }));
-        builder.ConfigureServices(s => s.Configure<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme, o => o.TimeProvider = clock));
+        builder.ConfigureServices(s =>
+        {
+            s.AddSingleton<TimeProvider>(clock);
+            s.Configure<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme, o => o.TimeProvider = clock);
+        });
     }
     public HttpClient Client() => CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = true });
 }

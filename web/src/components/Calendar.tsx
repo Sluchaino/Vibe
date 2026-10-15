@@ -1,5 +1,6 @@
 import type { CalendarResponse, TaskOccurrence } from '../api/types'
 import { effectiveFixed } from '../lib/operations'
+import { calendarMinutes, isCompleted } from '../lib/completion'
 import { addDays, dateLabel, instantLabel, intersects, startOfLocalDate } from '../lib/time'
 
 export function Calendar({ data, dates, timezone, view, onOpen }: { data: CalendarResponse | null; dates: string[]; timezone: string; view: 'day' | 'week'; onOpen: (occurrence: TaskOccurrence) => void }) {
@@ -11,7 +12,7 @@ export function Calendar({ data, dates, timezone, view, onOpen }: { data: Calend
     return <section className="calendar-day" key={date} aria-label={dateLabel(date)}><div className="calendar-day__heading"><h3>{dateLabel(date, true)}</h3>{hours !== 24 && <small>{hours} ч · перевод часов</small>}</div>{blocks.length === 0 && <p className="calendar-empty">Нет запланированных выполнений</p>}{blocks.map(block => {
       const occurrence = data?.occurrences.find(item => item.id === block.occurrenceId)
       const definition = data?.definitions.find(item => item.id === occurrence?.definitionId)
-      return <button type="button" className="calendar-event" key={block.id} onClick={() => occurrence && onOpen(occurrence)}><span className="event-time">{instantLabel(block.startInstant, timezone)}<br />— {instantLabel(block.endInstant, timezone)}</span><strong>{definition?.title ?? 'Выполнение'}</strong><span>{occurrence?.remainingWorkMinutes} мин · {occurrence && effectiveFixed(occurrence) ? 'закреплено' : 'можно перенести'}</span>{occurrence && occurrence.logicalDate !== date && <span>Метка выполнения: {occurrence.logicalDate}</span>}{block.startInstant < from && <span>Началось раньше этого дня</span>}{block.endInstant > to && <span>Продолжится на следующий день</span>}</button>
+      return <button type="button" className={`calendar-event ${occurrence && isCompleted(occurrence) ? 'calendar-event--done' : ''}`} key={block.id} onClick={() => occurrence && onOpen(occurrence)}><span className="event-time">{instantLabel(block.startInstant, timezone)}<br />— {instantLabel(block.endInstant, timezone)}</span><strong>{definition?.title ?? 'Выполнение'}</strong><span>{calendarMinutes(block)} мин · {occurrence && effectiveFixed(occurrence) ? 'закреплено' : 'без фиксации'}</span>{occurrence && <span>{isCompleted(occurrence) ? 'Выполнено · время остаётся занятым' : 'Не выполнено'}</span>}{occurrence && occurrence.logicalDate !== date && <span>Метка выполнения: {occurrence.logicalDate}</span>}{block.startInstant < from && <span>Началось раньше этого дня</span>}{block.endInstant > to && <span>Продолжится на следующий день</span>}</button>
     })}</section>
   })}</div>
 }

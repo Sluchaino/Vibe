@@ -53,6 +53,18 @@ public class OccurrenceRow
     public string SnapshotJson { get; set; } = "{}";
     public string Version { get; set; } = Versions.New();
     public BlockRow? Block { get; set; }
+    public ICollection<CompletionRow> Completions { get; set; } = new List<CompletionRow>();
+}
+public class CompletionRow
+{
+    public string UserId { get; set; } = "";
+    public Guid Id { get; set; }
+    public Guid OccurrenceId { get; set; }
+    public DateTime CompletedAtUtc { get; set; }
+    public DateTime? RevokedAtUtc { get; set; }
+    public string Source { get; set; } = "manual";
+    public string OccurrenceSnapshotJson { get; set; } = "{}";
+    public string Version { get; set; } = Versions.New();
 }
 public class BlockRow
 {
@@ -86,6 +98,7 @@ public class VibeDb(DbContextOptions<VibeDb> options) : IdentityDbContext<VibeUs
     public DbSet<OccurrenceRow> Occurrences => Set<OccurrenceRow>();
     public DbSet<BlockRow> Blocks => Set<BlockRow>();
     public DbSet<OperationRow> Operations => Set<OperationRow>();
+    public DbSet<CompletionRow> Completions => Set<CompletionRow>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -114,6 +127,13 @@ public class VibeDb(DbContextOptions<VibeDb> options) : IdentityDbContext<VibeUs
         b.Entity<OccurrenceRow>().HasOne(x => x.Block).WithOne().HasForeignKey<BlockRow>(x => new { x.UserId, x.OccurrenceId }).OnDelete(DeleteBehavior.Restrict);
         b.Entity<OperationRow>().ToTable("OperationResults").HasKey(x => new { x.UserId, x.OpId });
         b.Entity<OperationRow>().HasOne<VibeUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<CompletionRow>().ToTable("Completions", t => t.HasCheckConstraint("CK_Completion_ManualSource", "\"Source\" = 'manual'"));
+        b.Entity<CompletionRow>().HasKey(x => new { x.UserId, x.Id });
+        b.Entity<CompletionRow>().Property(x => x.OccurrenceSnapshotJson).HasColumnType("jsonb");
+        b.Entity<CompletionRow>().HasOne<OccurrenceRow>().WithMany(x => x.Completions)
+            .HasForeignKey(x => new { x.UserId, x.OccurrenceId }).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<CompletionRow>().HasIndex(x => new { x.UserId, x.OccurrenceId }).IsUnique()
+            .HasDatabaseName("UX_Completions_User_Occurrence_Active").HasFilter("\"RevokedAtUtc\" IS NULL");
     }
 }
 

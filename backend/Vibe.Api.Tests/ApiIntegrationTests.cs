@@ -9,8 +9,9 @@ using Xunit;
 
 namespace Vibe.Api.Tests;
 
-public class ApiIntegrationTests(PostgresFixture fixture) : IClassFixture<PostgresFixture>
+public partial class ApiIntegrationTests(PostgresFixture fixture) : IClassFixture<PostgresFixture>
 {
+    PostgresFixture C1Fixture => fixture;
     static string Id() => Guid.NewGuid().ToString("D");
     static JsonObject NewOp(JsonObject b) { b["opId"] = Id(); return b; }
     static async Task<JsonObject> Json(HttpResponseMessage r, HttpStatusCode expected = HttpStatusCode.OK)

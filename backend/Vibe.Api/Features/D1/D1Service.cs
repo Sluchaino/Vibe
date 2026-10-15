@@ -26,7 +26,7 @@ public sealed record ApiReply(int Status, string Body, string? ETag = null, stri
     public static string Quote(string version) => "\"" + version + "\"";
 }
 
-public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
+public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, TimeProvider clock)
 {
     static readonly string[] ConstraintKeys = ["durationPolicy", "splitAllowed", "mobilityPolicy", "availabilityRules", "placeId", "requiredRestMinutes"];
     static string Owner(HttpContext c) => c.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new DomainError(401, "unauthorized");
@@ -35,10 +35,20 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
     static JsonObject Category(CategoryRow c) => new() { ["id"] = c.Id.ToString("D"), ["name"] = c.Name, ["serverVersion"] = c.Version };
     public static JsonObject Definition(DefinitionRow d) { var result = Wire.Obj(d.FieldsJson); result["id"] = d.Id.ToString("D"); result["serverVersion"] = d.Version; return result; }
     public static JsonObject Block(BlockRow b) => new() { ["id"] = b.Id.ToString("D"), ["occurrenceId"] = b.OccurrenceId.ToString("D"), ["kind"] = "task", ["startInstant"] = TimeRules.Instant(b.Start), ["endInstant"] = TimeRules.Instant(b.End), ["fixed"] = b.Fixed, ["serverVersion"] = b.Version };
+    static CompletionRow? Active(OccurrenceRow o) => o.Completions.SingleOrDefault(c => c.RevokedAtUtc is null);
+    static string FactInstant(DateTime value) => value.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+    public static JsonObject Completion(CompletionRow c) => new()
+    {
+        ["id"] = c.Id.ToString("D"), ["occurrenceId"] = c.OccurrenceId.ToString("D"),
+        ["completedAt"] = FactInstant(c.CompletedAtUtc),
+        ["revokedAt"] = c.RevokedAtUtc is DateTime revoked ? JsonValue.Create(FactInstant(revoked)) : null,
+        ["source"] = c.Source, ["serverVersion"] = c.Version
+    };
     public static JsonObject Occurrence(OccurrenceRow o)
     {
         var snapshot = Wire.Obj(o.SnapshotJson);
-        return new JsonObject { ["id"] = o.Id.ToString("D"), ["definitionId"] = o.DefinitionId.ToString("D"), ["logicalDate"] = o.LogicalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = snapshot, ["remainingWorkMinutes"] = Wire.Int(snapshot["durationPolicy"]!, "requiredWorkMinutes"), ["placementStatus"] = o.Block is null ? "unplanned" : "planned", ["calendarBlock"] = o.Block is null ? null : Block(o.Block), ["serverVersion"] = o.Version };
+        var active = Active(o);
+        return new JsonObject { ["id"] = o.Id.ToString("D"), ["definitionId"] = o.DefinitionId.ToString("D"), ["logicalDate"] = o.LogicalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = snapshot, ["remainingWorkMinutes"] = active is null ? Wire.Int(snapshot["durationPolicy"]!, "requiredWorkMinutes") : 0, ["placementStatus"] = o.Block is null ? "unplanned" : "planned", ["calendarBlock"] = o.Block is null ? null : Block(o.Block), ["serverVersion"] = o.Version, ["completionStatus"] = active is null ? "incomplete" : "completed", ["completion"] = active is null ? null : Completion(active) };
     }
     static JsonObject Envelope(string key, JsonObject value, PlanRow p) => new() { [key] = value, ["planState"] = Plan(p) };
     static Guid RouteId(string? value) { if (!Wire.TryUuid(value, out var id)) Wire.Bad(); return id; }
@@ -54,7 +64,45 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
     }
     async Task<SettingsRow> UserSettings(string owner, CancellationToken ct) => await db.Settings.Include(x => x.Place).SingleAsync(x => x.UserId == owner, ct);
     async Task<DefinitionRow> FindDefinition(string owner, Guid id, CancellationToken ct, string errorCode = "notFound") => await db.Definitions.SingleOrDefaultAsync(x => x.UserId == owner && x.Id == id, ct) ?? throw new DomainError(404, errorCode);
-    async Task<OccurrenceRow> FindOccurrence(string owner, Guid id, CancellationToken ct) => await db.Occurrences.Include(x => x.Block).SingleOrDefaultAsync(x => x.UserId == owner && x.Id == id, ct) ?? throw new DomainError(404, "notFound");
+    IQueryable<OccurrenceRow> CurrentOccurrences() => db.Occurrences.Include(x => x.Block).Include(x => x.Completions.Where(c => c.RevokedAtUtc == null));
+    async Task<OccurrenceRow> FindOccurrence(string owner, Guid id, CancellationToken ct) => await CurrentOccurrences().SingleOrDefaultAsync(x => x.UserId == owner && x.Id == id, ct) ?? throw new DomainError(404, "notFound");
+    static DomainError CompletionConflict(string code, OccurrenceRow o) => new(409, code, new JsonObject { ["currentServerVersion"] = o.Version, ["currentOccurrence"] = Occurrence(o) }, ApiReply.Quote(o.Version));
+    DateTime AcceptedAt()
+    {
+        var utc = clock.GetUtcNow().UtcDateTime;
+        return new DateTime(utc.Ticks - utc.Ticks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
+    }
+    async Task<ApiReply> ToggleCompletion(string owner, OccurrenceRow o, PlanRow p, JsonObject body, string kind, CancellationToken ct)
+    {
+        var active = Active(o);
+        if (kind == "complete")
+        {
+            if (active is null)
+            {
+                var context = new JsonObject { ["logicalDate"] = o.LogicalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = Wire.Obj(o.SnapshotJson) };
+                var fact = new CompletionRow { UserId = owner, Id = Guid.NewGuid(), OccurrenceId = o.Id, CompletedAtUtc = AcceptedAt(), OccurrenceSnapshotJson = Wire.Json(context) };
+                db.Completions.Add(fact);
+                if (!o.Completions.Contains(fact)) o.Completions.Add(fact);
+                o.Version = Versions.New(); p.InputRevision++;
+            }
+        }
+        else
+        {
+            var completionId = Wire.Id(body, "completionId");
+            var target = await db.Completions.SingleOrDefaultAsync(c => c.UserId == owner && c.OccurrenceId == o.Id && c.Id == completionId, ct)
+                ?? throw new DomainError(404, "referenceNotFound");
+            if (target.RevokedAtUtc is not null)
+            {
+                if (active is not null) throw CompletionConflict("completionMismatch", o);
+            }
+            else
+            {
+                target.RevokedAtUtc = AcceptedAt(); target.Version = Versions.New();
+                o.Version = Versions.New(); p.InputRevision++;
+            }
+        }
+        return ApiReply.Json(Envelope("occurrence", Occurrence(o), p), version: o.Version);
+    }
     async Task References(string owner, JsonNode fields, bool definition, CancellationToken ct)
     {
         var place = Wire.Id(fields, "placeId");
@@ -86,7 +134,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
         try
         {
             Wire.Query(ctx.Request);
-            string schema = kind switch { "settings" => "UpdateSettingsRequest", "category" => "CreateCategoryRequest", "createDefinition" => "CreateDefinitionRequest", "updateDefinition" => "UpdateDefinitionRequest", "createOccurrence" => "CreateOccurrenceRequest", "updateOccurrence" => "UpdateOccurrenceRequest", "placement" => "PlacementCommand", _ => throw new InvalidOperationException() };
+            string schema = kind switch { "settings" => "UpdateSettingsRequest", "category" => "CreateCategoryRequest", "createDefinition" => "CreateDefinitionRequest", "updateDefinition" => "UpdateDefinitionRequest", "createOccurrence" => "CreateOccurrenceRequest", "updateOccurrence" => "UpdateOccurrenceRequest", "placement" => "PlacementCommand", "complete" => "CompleteOccurrenceRequest", "reopen" => "ReopenOccurrenceRequest", _ => throw new InvalidOperationException() };
             Wire.Validate(body, schema);
             // PostgreSQL jsonb has narrower exponent syntax than mathematical JSON numbers.
             // All approved numeric fields are Int32; persist their exact value after fingerprinting.
@@ -151,6 +199,16 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
             return ApiReply.Json(Envelope("occurrence", Occurrence(occurrence), p), 201, occurrence.Version, "/api/v1/occurrences/" + id.ToString("D"));
         }
         var o = await FindOccurrence(owner, RouteId(route), ct);
+        if (kind is "complete" or "reopen")
+        {
+            Match(ctx, o.Version, "currentOccurrence", Occurrence(o));
+            return await ToggleCompletion(owner, o, p, b, kind, ct);
+        }
+        if (Active(o) is not null)
+        {
+            Match(ctx, o.Version, "currentOccurrence", Occurrence(o));
+            throw CompletionConflict("occurrenceCompleted", o);
+        }
         if (kind == "updateOccurrence")
         {
             var snapshot = b["constraintsSnapshot"]!;
@@ -206,7 +264,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
             var settings = await UserSettings(owner, ct); TimeRules.CalendarRange(from, to, settings.Timezone);
             var blocks = await db.Blocks.Where(x => x.UserId == owner && x.Start < to && x.End > from).OrderBy(x => x.Start).ThenBy(x => x.Id).ToArrayAsync(ct);
             var ids = blocks.Select(x => x.OccurrenceId).ToArray();
-            var occurrences = await db.Occurrences.Include(x => x.Block).Where(x => x.UserId == owner && ids.Contains(x.Id)).OrderBy(x => x.Id).ToArrayAsync(ct);
+            var occurrences = await CurrentOccurrences().Where(x => x.UserId == owner && ids.Contains(x.Id)).OrderBy(x => x.Id).ToArrayAsync(ct);
             var definitionIds = occurrences.Select(x => x.DefinitionId).Distinct().ToArray();
             var definitions = await db.Definitions.Where(x => x.UserId == owner && definitionIds.Contains(x.Id)).OrderBy(x => x.Id).ToArrayAsync(ct);
             reply = ApiReply.Json(new JsonObject { ["from"] = TimeRules.Instant(from), ["to"] = TimeRules.Instant(to), ["blocks"] = Array(blocks.Select(Block)), ["occurrences"] = Array(occurrences.Select(Occurrence)), ["definitions"] = Array(definitions.Select(Definition)), ["planState"] = Plan(plan) });
@@ -218,7 +276,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
     async Task<ApiReply> Page(HttpContext ctx, string kind, string owner, PlanRow plan, CancellationToken ct)
     {
         var q = ctx.Request.Query;
-        if (kind == "occurrences") Wire.Query(ctx.Request, "pageSize", "cursor", "definitionId", "logicalDateFrom", "logicalDateTo", "placementStatus");
+        if (kind == "occurrences") Wire.Query(ctx.Request, "pageSize", "cursor", "definitionId", "logicalDateFrom", "logicalDateTo", "placementStatus", "completionStatus");
         else Wire.Query(ctx.Request, "pageSize", "cursor");
         int size = 50;
         if (q.ContainsKey("pageSize") && (!int.TryParse(q["pageSize"], NumberStyles.None, CultureInfo.InvariantCulture, out size) || size < 1 || size > 100)) Wire.Bad();
@@ -243,7 +301,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
         }
         else
         {
-            var query = db.Occurrences.Include(x => x.Block).Where(x => x.UserId == owner);
+            var query = CurrentOccurrences().Where(x => x.UserId == owner);
             if (q.ContainsKey("definitionId")) { var id = RouteId(q["definitionId"]); await FindDefinition(owner, id, ct, "referenceNotFound"); query = query.Where(x => x.DefinitionId == id); }
             DateOnly? from = q.ContainsKey("logicalDateFrom") ? TimeRules.Date(q["logicalDateFrom"].ToString()) : null;
             DateOnly? to = q.ContainsKey("logicalDateTo") ? TimeRules.Date(q["logicalDateTo"].ToString()) : null;
@@ -251,6 +309,12 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection)
             if (from is DateOnly f) query = query.Where(x => x.LogicalDate >= f);
             if (to is DateOnly t) query = query.Where(x => x.LogicalDate < t);
             if (q.ContainsKey("placementStatus")) { string status = q["placementStatus"].ToString(); if (status is not ("planned" or "unplanned")) Wire.Bad(); query = status == "planned" ? query.Where(x => x.Block != null) : query.Where(x => x.Block == null); }
+            if (q.ContainsKey("completionStatus"))
+            {
+                string status = q["completionStatus"].ToString();
+                if (status is not ("completed" or "incomplete")) Wire.Bad();
+                query = status == "completed" ? query.Where(x => x.Completions.Any(c => c.RevokedAtUtc == null)) : query.Where(x => !x.Completions.Any(c => c.RevokedAtUtc == null));
+            }
             if (after is Guid a) query = query.Where(x => x.Id.CompareTo(a) > 0);
             var rows = await query.OrderBy(x => x.Id).Take(size + 1).ToArrayAsync(ct); ids = rows.Select(x => x.Id).ToArray(); items = rows.Select(Occurrence).ToArray();
         }
