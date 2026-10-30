@@ -27,7 +27,7 @@ public sealed partial class SyncIntegrationTests(PostgresFixture fixture) : ICla
     }
     static async Task Error(HttpResponseMessage response, HttpStatusCode status, string code)
     {
-        var body = await Json(response, status); Wire.Validate(body, "ProblemDetails"); Assert.Equal(code, Wire.Str(body, "code"));
+        var body = await Json(response, status); Wire.Validate(body, "ProblemDetailsU1"); Assert.Equal(code, Wire.Str(body, "code"));
         Assert.Null(body["nextCursor"]); Assert.Null(body["nextPageCursor"]);
     }
     static Task<HttpResponseMessage> Send(HttpClient client, HttpMethod method, string path, JsonObject body, string? etag = null)
@@ -41,9 +41,9 @@ public sealed partial class SyncIntegrationTests(PostgresFixture fixture) : ICla
         var token = await Json(await client.GetAsync("/api/v1/auth/antiforgery"));
         client.DefaultRequestHeaders.Remove("X-CSRF-TOKEN"); client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", Wire.Str(token, "requestToken"));
     }
-    async Task<Session> Account(TestApp? app = null, string? ownerId = null)
+    async Task<Session> Account(TestApp? app = null, string? ownerId = null, DateTimeOffset? now = null)
     {
-        fixture.Clock.Reset(); app ??= fixture.App;
+        fixture.Clock.Reset(); if (now is DateTimeOffset instant) fixture.Clock.SetUtcNow(instant); app ??= fixture.App;
         string name = "sync_" + Guid.NewGuid().ToString("N"); var user = new VibeUser { UserName = name };
         if (ownerId is not null) user.Id = ownerId;
         using (var scope = app.Services.CreateScope())
@@ -64,13 +64,13 @@ public sealed partial class SyncIntegrationTests(PostgresFixture fixture) : ICla
     }
     static async Task<JsonObject> Bootstrap(HttpClient client, int size = 50)
     {
-        var response = await client.GetAsync("/api/v1/sync/bootstrap?pageSize=" + size); var body = await Json(response); Wire.Validate(body, "BootstrapPage");
+        var response = await client.GetAsync("/api/v1/sync/bootstrap?pageSize=" + size); var body = await Json(response); Wire.Validate(body, "BootstrapPageV3");
         Assert.Null(response.Headers.ETag); Assert.False(response.Headers.Contains("Idempotency-Replayed")); return body;
     }
     static string CursorPath(string resource, string cursor, string suffix = "") => "/api/v1/sync/" + resource + "?cursor=" + Uri.EscapeDataString(cursor) + suffix;
     static async Task<JsonObject> Delta(HttpClient client, string cursor, string suffix = "")
     {
-        var body = await Json(await client.GetAsync(CursorPath("changes", cursor, suffix))); Wire.Validate(body, "ChangesPage"); return body;
+        var body = await Json(await client.GetAsync(CursorPath("changes", cursor, suffix))); Wire.Validate(body, "ChangesPageV3"); return body;
     }
     static async Task<JsonObject> Category(HttpClient client, string? name = null, JsonObject? command = null)
         => await Json(await Send(client, HttpMethod.Post, "/api/v1/categories", command ?? new JsonObject { ["opId"] = Id(), ["id"] = Id(), ["name"] = name ?? "sync category" }), HttpStatusCode.Created);
@@ -109,7 +109,7 @@ public sealed partial class SyncIntegrationTests(PostgresFixture fixture) : ICla
         await Category(client, "C"); var snapshotItems = new List<JsonNode> { first["items"]![0]!.DeepClone() };
         while (true)
         {
-            var page = await Json(await client.GetAsync(CursorPath("bootstrap", next))); Wire.Validate(page, "BootstrapPage");
+            var page = await Json(await client.GetAsync(CursorPath("bootstrap", next))); Wire.Validate(page, "BootstrapPageV3");
             foreach (string field in new[] { "streamId", "snapshotId", "expiresAt", "asOfCursor", "planState" }) Assert.True(JsonNode.DeepEquals(first[field], page[field]));
             snapshotItems.AddRange(page["items"]!.AsArray().Select(i => i!.DeepClone()));
             if (page["nextPageCursor"] is null) break; next = Wire.Str(page, "nextPageCursor");
@@ -149,7 +149,7 @@ public sealed partial class SyncIntegrationTests(PostgresFixture fixture) : ICla
             await Error(await client.GetAsync(CursorPath("changes", Codec.Delta(session.Owner, invalid))), HttpStatusCode.BadRequest, "invalidCursor");
         foreach (var reset in new[] { new DeltaPosition(Guid.NewGuid(), 0), new DeltaPosition(stream.StreamId, stream.LastSequence + 1), new DeltaPosition(stream.StreamId, 0, stream.LastSequence + 1, 1) })
             await Error(await client.GetAsync(CursorPath("changes", Codec.Delta(session.Owner, reset))), HttpStatusCode.Gone, "syncResetRequired");
-        var protector = fixture.App.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("Vibe.S1.Delta", "s1", session.Owner);
+        var protector = fixture.App.Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("Vibe.S3.Delta", "s3", session.Owner);
         var huge = protector.Protect("{\"StreamId\":\"" + stream.StreamId + "\",\"After\":9223372036854775808}");
         await Error(await client.GetAsync(CursorPath("changes", huge)), HttpStatusCode.BadRequest, "invalidCursor");
         client.DefaultRequestHeaders.Remove("X-CSRF-TOKEN"); await Bootstrap(client, 1); // GET has no antiforgery requirement.

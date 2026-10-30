@@ -32,6 +32,7 @@ public sealed partial class SyncIntegrationTests
     static async Task<string> SetupPlace(HttpClient client)
     {
         var response = await client.GetAsync("/api/v1/settings"); var current = await Json(response);
+        if (current["settings"]!["place"] is JsonNode existing) return Wire.Str(existing, "id");
         string place = Id();
         await Json(await Send(client, HttpMethod.Put, "/api/v1/settings", new JsonObject
         {
@@ -54,7 +55,7 @@ public sealed partial class SyncIntegrationTests
         var update = create.DeepClone().AsObject(); update.Remove("id"); update["opId"] = Id(); update["title"] = "updated metadata";
         definition = await Json(await Send(client, HttpMethod.Put, "/api/v1/task-definitions/" + Wire.Str(definition["definition"]!, "id"), update, ETag(definition, "definition")));
         var occurrence = await NewOccurrence(client, definition); string path = OccPath(occurrence);
-        var edit = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2026-10-16", ["constraintsSnapshot"] = occurrence["occurrence"]!["constraintsSnapshot"]!.DeepClone(), ["allowFixedChange"] = false };
+        var edit = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2026-10-16", ["constraintsSnapshot"] = LegacyTestWire.Constraints(occurrence["occurrence"]!["constraintsSnapshot"]!), ["allowFixedChange"] = false };
         occurrence = await Json(await Send(client, HttpMethod.Put, path, edit, ETag(occurrence)));
         occurrence = await Place(client, occurrence, "place"); occurrence = await Place(client, occurrence, "setFixed");
         string fixedBlock = Wire.Json(occurrence["occurrence"]!["calendarBlock"]!); var completedCommand = new JsonObject { ["opId"] = Id() };

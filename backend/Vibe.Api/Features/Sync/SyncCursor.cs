@@ -10,7 +10,7 @@ public sealed record DeltaPosition(Guid StreamId, long After, long? Horizon = nu
 
 public sealed class SyncCursor(IDataProtectionProvider protection)
 {
-    IDataProtector Protector(string owner, bool page) => protection.CreateProtector(page ? "Vibe.S1.BootstrapPage" : "Vibe.S1.Delta", "s1", owner);
+    IDataProtector Protector(string owner, bool page) => protection.CreateProtector(page ? "Vibe.S3.BootstrapPage" : "Vibe.S3.Delta", "s3", owner);
     public string Page(string owner, BootstrapPosition position) => Protector(owner, true).Protect(JsonSerializer.Serialize(position));
     public string Delta(string owner, DeltaPosition position) => Protector(owner, false).Protect(JsonSerializer.Serialize(position));
     T Read<T>(string owner, string token, bool page)

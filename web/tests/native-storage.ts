@@ -1,6 +1,7 @@
 import { openStorage, type DraftRecord, type StoragePort } from '../src/persistence/database.ts'
 import { freezePending } from '../src/sync/runtime.ts'
 import { captureCommand } from '../src/lib/operations.ts'
+import { DraftSession } from '../src/lib/draft-session.ts'
 
 const button = document.querySelector<HTMLButtonElement>('#run')!
 const results = document.querySelector<HTMLOListElement>('#results')!
@@ -44,7 +45,8 @@ button.addEventListener('click', async () => {
     const ack = (await first.getPending(user))!
     check(ack.status === 'acknowledgedRefresh', 'Crash потерял ACK состояние')
     check(await first.transition(ack, null, true), 'Не удалось освободить ACK slot')
-    check((await second!.drafts(user))[0]?.revision === 2, 'ACK удалил более новый ввод')
+    check((await second!.drafts(user)).find(row => row.draftId === draft.draftId)?.revision === 2, 'ACK удалил более новый ввод')
+    check(!(await second!.drafts(user)).some(row => row.draftId === ack.recoveryDraftId), 'ACK не очистил собственный отправленный снимок')
     const next = make(); check(await second!.reserve(next, { ...draft, revision: 2 }), 'Новый slot не создан')
     check(!await first.transition(ack, null, true), 'Поздний ACK удалил новый slot')
     check((await first.getPending(user))?.opId === next.opId, 'Новая отправка потеряна')
@@ -58,6 +60,35 @@ button.addEventListener('click', async () => {
     check(await first!.transition(rejected, null), 'Отказ не разрешён')
     await first!.clearAccount(user)
     check((await second!.drafts(user)).length === 0, 'Черновики не очищены')
+  })
+  await run('Manual draft CAS: два connection обновляют один ID, проигравший получает явный отказ', async () => {
+    const saved = { ...draft, category: 'manual' as const }
+    check(await first!.saveDraftCas(saved, null), 'Не создан ручной черновик')
+    const won = await Promise.all([first!.saveDraftCas({ ...saved, revision: 2, value: { name: 'Вкладка A' } }, 1), second!.saveDraftCas({ ...saved, revision: 2, value: { name: 'Вкладка B' } }, 1)])
+    check(won.filter(Boolean).length === 1, 'Два редактора перезаписали друг друга')
+    const rows = await second!.drafts(user)
+    check(rows.length === 1 && rows[0]?.draftId === saved.draftId && rows[0]?.revision === 2, 'Создана копия вместо обновления того же ID')
+  })
+  await run('Открытие/закрытие неизменённого черновика не создаёт записей; legacy revision 0 отличается от отсутствия', async () => {
+    const rows = await first!.drafts(user), saved = rows.find(row => row.draftId === draft.draftId)!
+    const editor = new DraftSession(user, saved.key, {}, {}, saved, async () => second!, () => undefined, 'native-tab')
+    check(!editor.dirty && !editor.needsLeave, 'Неизменённый черновик ошибочно считается изменённым')
+    await editor.save(); await editor.discard()
+    check(JSON.stringify(await first!.drafts(user)) === JSON.stringify(rows), 'Открытие/закрытие записало копию')
+    const zero = { ...draft, draftId: crypto.randomUUID(), revision: 0 }
+    check(!await first!.saveDraftCas(zero, 0), 'Missing принят за revision 0')
+    check(await first!.saveDraftCas(zero, null), 'Новый revision 0 не создан')
+    check(!await second!.saveDraftCas({ ...zero, revision: 1 }, null), 'Revision 0 принят за missing')
+    check(await second!.deleteDraftCas(user, zero.draftId, 0), 'Не удалось удалить revision 0')
+    check(!await first!.saveDraftCas({ ...zero, revision: 1 }, 0), 'Удалённый другой вкладкой черновик воскрешён')
+  })
+  await run('Legacy pending ACK не удаляет пользовательский черновик без отдельного recovery marker', async () => {
+    const saved = { ...(await first!.drafts(user)).find(row => row.draftId === draft.draftId)!, category: undefined }
+    check(await first!.saveDraftCas(saved, saved.revision), 'Не подготовлен legacy черновик без категории')
+    const legacy = { ...make(), recoveryDraftId: undefined, recoveryRevision: undefined }
+    check(await first!.reserve(legacy, saved), 'Не создан legacy slot')
+    check(await second!.transition(legacy, null, true), 'Legacy slot не разрешён')
+    check(JSON.stringify((await first!.drafts(user)).find(row => row.draftId === saved.draftId)) === JSON.stringify(saved), 'Legacy ACK удалил или переписал manual')
   })
   await run('Будущая версия: failed open не удаляет store и допускает новое открытие после устранения причины', async () => {
     const name = prefix + '.future'

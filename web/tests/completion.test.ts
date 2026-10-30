@@ -46,7 +46,7 @@ test('completed calendar block still has 90 elapsed minutes across DST despite r
   const complete = occurrenceFixture(completionA)
   assert.equal(complete.remainingWorkMinutes, 0)
   assert.equal(calendarMinutes(complete.calendarBlock!), 90)
-  assert.equal(complete.constraintsSnapshot.durationPolicy.requiredWorkMinutes, 90)
+  assert.equal(complete.constraintsSnapshot.durationPolicy!.requiredWorkMinutes, 90)
   const reopened = occurrenceFixture()
   assert.deepEqual(reopened.calendarBlock, complete.calendarBlock)
   assert.equal(calendarMinutes(reopened.calendarBlock!), 90)

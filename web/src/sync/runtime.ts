@@ -3,11 +3,12 @@ import { captureCommand, type Command, type PendingCommand } from '../lib/operat
 import { identityState } from '../state/session.ts'
 import { openStorage, type DraftRecord, type PendingRecord, type StoragePort } from '../persistence/database.ts'
 import { SyncCoordinator } from './coordinator.ts'
+import { DraftSession, DraftConflictError } from '../lib/draft-session.ts'
 
-export interface LocalState { drafts: DraftRecord[]; pending: PendingRecord | null; storageError: Error | null; ready: boolean; busy: boolean }
+export interface LocalState { drafts: DraftRecord[]; pending: PendingRecord | null; storageError: Error | null; ready: boolean; busy: boolean; leaveRequested: boolean; leaveError: Error | null }
 export const pendingLabels = { unconfirmed: 'Осталась неподтверждённая отправка', acknowledgedRefresh: 'Сохранено, ожидается обновление', conflict: 'Изменения требуют сравнения', rejected: 'Изменения отклонены', resetReview: 'Источник данных восстановлен — проверьте отправку' }
 export function freezePending(command: PendingCommand, draft: DraftRecord, streamId: string): PendingRecord {
-  return { userId: command.userId, opId: command.opId, command: structuredClone(command), query: command.path.includes('?') ? command.path.slice(command.path.indexOf('?') + 1) : '', ifMatch: command.version ? `"${command.version}"` : null, draftId: draft.draftId, draftRevision: draft.revision, submittedDraft: structuredClone(draft), streamId, pendingRevision: 1, status: 'unconfirmed' }
+  return { userId: command.userId, opId: command.opId, command: structuredClone(command), query: command.path.includes('?') ? command.path.slice(command.path.indexOf('?') + 1) : '', ifMatch: command.version ? `"${command.version}"` : null, draftId: draft.draftId, draftRevision: draft.revision, submittedDraft: structuredClone(draft), recoveryDraftId: `pending:${command.opId}`, recoveryRevision: 1, streamId, pendingRevision: 1, status: 'unconfirmed' }
 }
 export function needsReset(record: PendingRecord, streamId: string) { return (record.authorizedStream ?? record.streamId) !== streamId && record.status !== 'resetReview' }
 export function uncertainFailure(error: unknown) { return !(error instanceof ApiError) || ![400, 404, 409, 412, 428].includes(error.problem.status) }
@@ -17,7 +18,10 @@ export function uncertainFailure(error: unknown) { return !(error instanceof Api
 export class AccountRuntime {
   readonly coordinator: SyncCoordinator
   readonly editors = new Map<string, () => DraftRecord>()
-  private local: LocalState = { drafts: [], pending: null, storageError: null, ready: false, busy: false }
+  readonly sessions = new Set<DraftSession>()
+  readonly tabId = crypto.randomUUID()
+  private leaving: { action: () => unknown; resolve: (allowed: boolean) => void } | null = null
+  private local: LocalState = { drafts: [], pending: null, storageError: null, ready: false, busy: false, leaveRequested: false, leaveError: null }
   private listeners = new Set<() => void>()
   private epoch = identityState.epoch
   private closed = false
@@ -54,14 +58,54 @@ export class AccountRuntime {
       this.publish({ drafts, pending, ready: true })
     } catch (error) { this.storageFailure(error) }
   }
+  async latestDraft(draftId: string) { const rows = await (await this.storage()).drafts(this.userId); if (!this.current()) throw new IdentityChangedError('Сеанс изменился.'); return rows.find(row => row.draftId === draftId) }
   private notify(serverChanged = false) { this.channel?.postMessage({ serverChanged }); void this.reload() }
+  createSession(key: string, value: unknown, base: unknown, restored: DraftRecord | null) { return new DraftSession(this.userId, key, value, base, restored?.key === key && restored.userId === this.userId ? restored : null, () => this.storage(), () => { this.publish({}); this.notify() }, this.tabId) }
+  hasUnsaved() { return [...this.sessions].some(session => session.needsLeave) }
+  requestCreationModeChange(action: () => unknown): Promise<boolean> {
+    if (!this.current() || this.leaving) return Promise.resolve(false)
+    // Switching the kind of an untouched new form is still part of starting
+    // creation. Close/logout keep their existing pristine-new-task guard.
+    if ([...this.sessions].some(session => session.dirty)) return this.requestLeave(action)
+    return Promise.resolve(action()).then(() => true)
+  }
+  requestLeave(action: () => unknown): Promise<boolean> {
+    if (!this.current()) return Promise.resolve(false)
+    if (!this.hasUnsaved()) return Promise.resolve(action()).then(() => true)
+    if (this.leaving) return Promise.resolve(false)
+    return new Promise(resolve => { this.leaving = { action, resolve }; this.publish({ leaveRequested: true, leaveError: null }) })
+  }
+  async decideLeave(choice: 'save' | 'discard' | 'continue') {
+    const leaving = this.leaving
+    if (!leaving) return
+    if (choice === 'continue') { this.leaving = null; this.publish({ leaveRequested: false, leaveError: null }); leaving.resolve(false); return }
+    try {
+      for (const session of this.sessions) if (session.needsLeave) { if (choice === 'save') await session.save(); else await session.discard() }
+      if (!this.current() || this.leaving !== leaving) return
+      if (this.hasUnsaved()) { this.publish({ leaveError: new Error('Во время сохранения появился новый ввод. Проверьте его перед выходом.') }); return }
+      this.leaving = null; this.publish({ leaveRequested: false, leaveError: null })
+      await leaving.action(); leaving.resolve(true)
+    } catch (error) { this.publish({ leaveError: error instanceof Error ? error : new Error('Не удалось сохранить черновик.') }); if (this.leaving !== leaving) leaving.resolve(false) }
+  }
+  private beforeUnload = (event: BeforeUnloadEvent) => { if ([...this.sessions].some(session => session.dirty)) { event.preventDefault(); event.returnValue = '' } }
   saveDraft(draft: DraftRecord) { void this.storage().then(storage => storage.saveDraft(draft)).then(() => { this.publish({ storageError: null }); this.notify() }).catch(error => this.storageFailure(error)) }
+  async saveDraftAndWait(draft: DraftRecord) {
+    if (!this.current() || draft.userId !== this.userId) throw new IdentityChangedError('Сеанс изменился. Ввод сохранён для исходного аккаунта.')
+    try {
+      const storage = await this.storage()
+      if (!this.current()) throw new IdentityChangedError('Сеанс изменился. Отправка остановлена.')
+      const expected = Object.hasOwn(draft, 'expectedRevision') ? draft.expectedRevision ?? null : draft.revision === 1 ? null : draft.revision - 1
+      if (!await storage.saveDraftCas({ ...draft, category: 'continuation', expectedRevision: draft.revision }, expected)) throw new DraftConflictError()
+      if (!this.current()) throw new IdentityChangedError('Сеанс изменился. Продолжение доступно исходному аккаунту.')
+      this.publish({ storageError: null }); this.notify()
+    } catch (error) { if (!(error instanceof IdentityChangedError)) this.storageFailure(error); throw error }
+  }
   async retryStorage() {
     this.opened?.close(); this.opened = null
     this.storagePromise = this.open()
     this.storagePromise.catch(() => undefined)
-    const storage = await this.storage()
-    for (const get of this.editors.values()) await storage.saveDraft(get())
+    await this.storage()
+    for (const session of this.sessions) await session.retryEmergency()
     this.publish({ storageError: null }); await this.reload()
   }
   async start() {
@@ -69,15 +113,18 @@ export class AccountRuntime {
     if (typeof BroadcastChannel !== 'undefined') { this.channel = new BroadcastChannel('vibe-s1'); this.channel.onmessage = event => { void this.reload(); if (event.data?.serverChanged === true) void this.coordinator.catchUp().catch(() => undefined) } }
     this.unsubscribe = this.coordinator.subscribe(() => { const sync = this.coordinator.snapshot(); if (sync.status === 'ready' && !sync.busy) void this.reconcile().catch(error => this.storageFailure(error)) })
     this.coordinator.start()
+    if (typeof window !== 'undefined') window.addEventListener('beforeunload', this.beforeUnload)
     await this.reload()
     if (!this.current()) return
     this.interval = setInterval(() => { void this.reload() }, 5000)
   }
-  stop() { this.closed = true; this.coordinator.stop(); this.unsubscribe?.(); this.channel?.close(); clearInterval(this.interval); void this.storagePromise.then(storage => storage.close()).catch(() => undefined) }
+  stop() { this.closed = true; this.leaving?.resolve(false); this.leaving = null; this.coordinator.stop(); this.unsubscribe?.(); this.channel?.close(); clearInterval(this.interval); if (typeof window !== 'undefined') window.removeEventListener('beforeunload', this.beforeUnload); void this.storagePromise.then(storage => storage.close()).catch(() => undefined) }
   assertDispatch = () => {
     const sync = this.coordinator.snapshot()
     if (!this.current()) throw new IdentityChangedError('Сеанс изменился. Отправка сохранена для исходного аккаунта.')
     if (!this.local.ready || this.local.storageError) throw this.local.storageError ?? new Error('Локальное хранилище ещё не готово.')
+    const failedDraft = [...this.sessions].find(session => session.error && !(session.error instanceof DraftConflictError))
+    if (failedDraft) throw failedDraft.error
     if (sync.status !== 'ready' || !sync.projection) throw new Error('Сначала дождитесь успешного обновления данных. Ввод сохранён.')
   }
   async reconcile() {
@@ -137,6 +184,8 @@ export class AccountRuntime {
     const stored = await storage.getPending(this.userId)
     if (!stored || stored.opId !== original.opId || stored.pendingRevision !== original.pendingRevision || stored.status !== original.status) { this.notify(); return false }
     let pending = stored
+    const submittedDraft = stored.submittedDraft
+    let acknowledgedHere = false
     const assertFrozen = () => {
       this.assertDispatch()
       if ((pending.authorizedStream ?? pending.streamId) !== this.coordinator.snapshot().projection!.streamId) throw new Error('Источник данных изменился. Нужна отдельная проверка исходной отправки.')
@@ -145,6 +194,7 @@ export class AccountRuntime {
       try {
         assertFrozen()
         await this.sender(pending.command, assertFrozen)
+        acknowledgedHere = true
       } catch (error) {
         if (!uncertainFailure(error)) {
           const problem = (error as ApiError).problem
@@ -156,8 +206,22 @@ export class AccountRuntime {
         }
         this.notify(); throw error
       }
-      if (!await storage.transition(pending, { status: 'acknowledgedRefresh' })) { this.notify(); return false }
-      pending = { ...pending, status: 'acknowledgedRefresh', pendingRevision: pending.pendingRevision + 1 }
+      const marked = await storage.transition(pending, { status: 'acknowledgedRefresh' })
+      const acknowledged: PendingRecord = { ...pending, status: 'acknowledgedRefresh', pendingRevision: pending.pendingRevision + 1 }
+      if (marked) pending = acknowledged
+      else {
+        // An explicit retry in another tab may receive the same HTTP ACK and
+        // transition/release the slot while our original HTTP is still pending.
+        const peer = await storage.getPending(this.userId)
+        if (!this.current()) { this.notify(); return false }
+        if (peer?.opId === pending.opId) {
+          const sameCommand = JSON.stringify(peer.command) === JSON.stringify(pending.command) && peer.ifMatch === pending.ifMatch && peer.query === pending.query
+          if (peer.status !== 'acknowledgedRefresh' || !sameCommand || (peer.authorizedStream ?? peer.streamId) !== (pending.authorizedStream ?? pending.streamId)) { this.notify(); return false }
+          pending = peer
+        } else pending = acknowledged
+        // This local token is evidence of our own received ACK, not a write or
+        // adoption of a newer slot. It must still pass a fresh post-ACK tail.
+      }
       this.notify(true)
     }
     if (pending.status !== 'acknowledgedRefresh' || !this.current()) return false
@@ -166,8 +230,23 @@ export class AccountRuntime {
     const stream = this.coordinator.snapshot().projection!.streamId
     if (needsReset(pending, stream)) { await storage.transition(pending, { status: 'resetReview', previousStatus: pending.status }); this.notify(); return false }
     const released = await storage.transition(pending, null, true)
+    let peerFinished = false, acknowledgeSource = released
+    if (!released && acknowledgedHere) {
+      // Another tab may have read this known ACK, obtained its own fresh tail,
+      // and released the shared slot before this sender's tail finished.
+      // Absence alone is not evidence: this branch requires our HTTP ACK plus
+      // the post-ACK barrier above, with the same current owner and stream.
+      const replacement = await storage.getPending(this.userId)
+      const fresh = this.coordinator.snapshot().projection
+      if (!this.current() || !fresh || needsReset(pending, fresh.streamId)) { this.notify(); return false }
+      peerFinished = replacement === null
+      acknowledgeSource = peerFinished || (replacement !== null && replacement.opId !== pending.opId)
+      // A newer slot is never released or replayed here. Settle only an exact
+      // unchanged source snapshot, and stop any dependent UI workflow.
+    }
+    if (acknowledgeSource && this.current()) for (const session of this.sessions) session.acknowledge(submittedDraft)
     this.notify()
-    return released && this.current()
+    return (released || peerFinished) && this.current()
   }
   async resolveRejection() {
     this.assertDispatch()

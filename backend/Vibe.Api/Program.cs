@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Vibe.Api.Data;
 using Vibe.Api.Features.D1;
 using Vibe.Api.Features.Sync;
+using Vibe.Api.Features.Recurrence;
 
 var builder = WebApplication.CreateBuilder(args);
 string? localConfig = null;
@@ -30,6 +31,10 @@ if (builder.Environment.IsDevelopment())
 }
 builder.Services.AddDbContext<VibeDb>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("Vibe") ?? throw new InvalidOperationException("PostgreSQL configuration is required.")));
 builder.Services.AddScoped<D1Service>();
+builder.Services.AddScoped<RecurrenceService>();
+builder.Services.AddOptions<RecurrenceOptions>().Bind(builder.Configuration.GetSection("Recurrence"))
+    .Validate(o => o.PollIntervalSeconds > 0 && o.MaxRulesPerPass is > 0 and <= 100 && o.TransactionTimeoutSeconds > 0, "Recurrence worker limits are invalid.").ValidateOnStart();
+builder.Services.AddHostedService<RecurrenceWorker>();
 builder.Services.AddScoped<SyncService>();
 builder.Services.AddScoped<SyncMaintenance>();
 builder.Services.AddSingleton<SyncCursor>();
@@ -206,6 +211,9 @@ domain.MapPost("/occurrences/{id}/completion/reopen", (HttpContext c, D1Service 
 domain.MapGet("/calendar", (HttpContext c, D1Service d) => d.Read(c, "calendar"));
 domain.MapGet("/sync/bootstrap", (HttpContext c, SyncService s) => s.Bootstrap(c));
 domain.MapGet("/sync/changes", (HttpContext c, SyncService s) => s.Changes(c));
+domain.MapPost("/task-definitions/{id}/recurrence-rule", (HttpContext c, D1Service d, string id) => d.Mutate(c, "createRecurrence", id));
+domain.MapGet("/recurrence-rules/{id}", (HttpContext c, RecurrenceService r, string id) => r.Read(c, id));
+domain.MapPost("/recurrence-rules/{id}/stop", (HttpContext c, D1Service d, string id) => d.Mutate(c, "stopRecurrence", id));
 app.MapFallback("/api/{**path}", (HttpContext c) => new ApiReply(404, Wire.Json(Wire.Problem(c, new DomainError(404, "notFound")))).ExecuteAsync(c));
 app.Run();
 

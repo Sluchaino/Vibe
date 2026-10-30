@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Vibe.Api.Data;
 using Vibe.Api.Features.Sync;
+using Vibe.Api.Features.Recurrence;
 
 namespace Vibe.Api.Features.D1;
 
@@ -27,14 +28,14 @@ public sealed record ApiReply(int Status, string Body, string? ETag = null, stri
     public static string Quote(string version) => "\"" + version + "\"";
 }
 
-public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, TimeProvider clock)
+public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, TimeProvider clock, RecurrenceService recurrence)
 {
     static readonly string[] ConstraintKeys = ["durationPolicy", "splitAllowed", "mobilityPolicy", "availabilityRules", "placeId", "requiredRestMinutes"];
     static string Owner(HttpContext c) => c.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new DomainError(401, "unauthorized");
     public static JsonObject Plan(PlanRow p) => new() { ["planningInputRevision"] = "input_" + p.InputRevision.ToString("x", CultureInfo.InvariantCulture), ["scheduleVersion"] = "schedule_" + p.ScheduleRevision.ToString("x", CultureInfo.InvariantCulture) };
     public static JsonObject Settings(SettingsRow s) => new() { ["timezone"] = s.Timezone, ["weekStartsOn"] = "monday", ["place"] = s.Place is null ? null : new JsonObject { ["id"] = s.Place.Id.ToString("D"), ["name"] = s.Place.Name, ["serverVersion"] = s.Place.Version }, ["serverVersion"] = s.Version };
     public static JsonObject Category(CategoryRow c) => new() { ["id"] = c.Id.ToString("D"), ["name"] = c.Name, ["serverVersion"] = c.Version };
-    public static JsonObject Definition(DefinitionRow d) { var result = Wire.Obj(d.FieldsJson); result["id"] = d.Id.ToString("D"); result["serverVersion"] = d.Version; return result; }
+    public static JsonObject Definition(DefinitionRow d) { var result = U1Projection.Definition(Wire.Obj(d.FieldsJson)); result["id"] = d.Id.ToString("D"); result["serverVersion"] = d.Version; return result; }
     public static JsonObject Block(BlockRow b) => new() { ["id"] = b.Id.ToString("D"), ["occurrenceId"] = b.OccurrenceId.ToString("D"), ["kind"] = "task", ["startInstant"] = TimeRules.Instant(b.Start), ["endInstant"] = TimeRules.Instant(b.End), ["fixed"] = b.Fixed, ["serverVersion"] = b.Version };
     static CompletionRow? Active(OccurrenceRow o) => o.Completions.SingleOrDefault(c => c.RevokedAtUtc is null);
     static string FactInstant(DateTime value) => value.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
@@ -47,15 +48,15 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
     };
     public static JsonObject Occurrence(OccurrenceRow o)
     {
-        var snapshot = Wire.Obj(o.SnapshotJson);
+        var snapshot = U1Projection.Constraints(Wire.Obj(o.SnapshotJson));
         var active = Active(o);
-        return new JsonObject { ["id"] = o.Id.ToString("D"), ["definitionId"] = o.DefinitionId.ToString("D"), ["logicalDate"] = o.LogicalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = snapshot, ["remainingWorkMinutes"] = active is null ? Wire.Int(snapshot["durationPolicy"]!, "requiredWorkMinutes") : 0, ["placementStatus"] = o.Block is null ? "unplanned" : "planned", ["calendarBlock"] = o.Block is null ? null : Block(o.Block), ["serverVersion"] = o.Version, ["completionStatus"] = active is null ? "incomplete" : "completed", ["completion"] = active is null ? null : Completion(active) };
+        return new JsonObject { ["id"] = o.Id.ToString("D"), ["definitionId"] = o.DefinitionId.ToString("D"), ["logicalDate"] = o.LogicalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = snapshot, ["remainingWorkMinutes"] = active is null ? U1Projection.Work(snapshot) : 0, ["placementStatus"] = o.Block is null ? "unplanned" : "planned", ["calendarBlock"] = o.Block is null ? null : Block(o.Block), ["serverVersion"] = o.Version, ["completionStatus"] = active is null ? "incomplete" : "completed", ["completion"] = active is null ? null : Completion(active), ["timeIntent"] = o.TimeIntentJson is null ? null : Wire.Obj(o.TimeIntentJson), ["resolvedTiming"] = o.ResolvedTimingJson is null ? null : Wire.Obj(o.ResolvedTimingJson), ["placementIssue"] = o.PlacementIssue };
     }
     static JsonObject Envelope(string key, JsonObject value, PlanRow p) => new() { [key] = value, ["planState"] = Plan(p) };
     static Guid RouteId(string? value) { if (!Wire.TryUuid(value, out var id)) Wire.Bad(); return id; }
     static void Name(JsonNode node, string key) { if (string.IsNullOrWhiteSpace(Wire.Str(node, key))) Wire.Bad(); }
-    static JsonObject Snapshot(JsonNode fields) { var result = new JsonObject(); foreach (var key in ConstraintKeys) result[key] = fields[key]!.DeepClone(); return result; }
-    static JsonObject Fields(JsonObject body) { var fields = body.DeepClone().AsObject(); fields.Remove("opId"); fields.Remove("id"); return fields; }
+    public static JsonObject Snapshot(JsonNode fields) { var result = new JsonObject(); foreach (var key in ConstraintKeys) result[key] = fields[key]?.DeepClone(); if (fields.AsObject().ContainsKey("workOrigin")) result["workOrigin"] = fields["workOrigin"]!.DeepClone(); return result; }
+    static JsonObject Fields(JsonObject body) { var fields = body.DeepClone().AsObject(); fields.Remove("opId"); fields.Remove("id"); return U1Projection.Constraints(fields); }
     static void Match(HttpContext c, string version, string field, JsonObject current)
     {
         var raw = c.Request.Headers["If-Match"];
@@ -80,7 +81,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
         {
             if (active is null)
             {
-                var context = new JsonObject { ["logicalDate"] = o.LogicalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = Wire.Obj(o.SnapshotJson) };
+                var context = new JsonObject { ["logicalDate"] = o.LogicalDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["sourceDefinitionVersion"] = o.SourceDefinitionVersion, ["constraintsSnapshot"] = U1Projection.Constraints(Wire.Obj(o.SnapshotJson)), ["timeIntent"] = o.TimeIntentJson is null ? null : Wire.Obj(o.TimeIntentJson), ["resolvedTiming"] = o.ResolvedTimingJson is null ? null : Wire.Obj(o.ResolvedTimingJson) };
                 var fact = new CompletionRow { UserId = owner, Id = Guid.NewGuid(), OccurrenceId = o.Id, CompletedAtUtc = AcceptedAt(), OccurrenceSnapshotJson = Wire.Json(context) };
                 db.Completions.Add(fact);
                 if (!o.Completions.Contains(fact)) o.Completions.Add(fact);
@@ -135,8 +136,9 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
         try
         {
             Wire.Query(ctx.Request);
-            string schema = kind switch { "settings" => "UpdateSettingsRequest", "category" => "CreateCategoryRequest", "createDefinition" => "CreateDefinitionRequest", "updateDefinition" => "UpdateDefinitionRequest", "createOccurrence" => "CreateOccurrenceRequest", "updateOccurrence" => "UpdateOccurrenceRequest", "placement" => "PlacementCommand", "complete" => "CompleteOccurrenceRequest", "reopen" => "ReopenOccurrenceRequest", _ => throw new InvalidOperationException() };
-            Wire.Validate(body, schema);
+            string schema = kind switch { "settings" => "UpdateSettingsRequest", "category" => "CreateCategoryRequest", "createDefinition" => "CreateDefinitionRequest", "updateDefinition" => "UpdateDefinitionRequest", "createOccurrence" => "CreateOccurrenceRequest", "updateOccurrence" => "UpdateOccurrenceRequest", "placement" => "PlacementCommand", "complete" => "CompleteOccurrenceRequest", "reopen" => "ReopenOccurrenceRequest", "createRecurrence" => "CreateRecurrenceRuleRequest", "stopRecurrence" => "StopRecurrenceRuleRequest", _ => throw new InvalidOperationException() };
+            if (kind is "createDefinition" or "updateDefinition" or "createOccurrence" or "updateOccurrence" or "createRecurrence") Wire.ValidateEither(body, schema + "U1", schema);
+            else Wire.Validate(body, schema);
             // PostgreSQL jsonb has narrower exponent syntax than mathematical JSON numbers.
             // All approved numeric fields are Int32; persist their exact value after fingerprinting.
             Wire.NormalizeIntegers(body);
@@ -156,6 +158,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
     }
     async Task<ApiReply> Apply(HttpContext ctx, string owner, PlanRow p, JsonObject b, string kind, string? route, CancellationToken ct)
     {
+        if (kind is "createRecurrence" or "stopRecurrence") return await recurrence.Apply(ctx, owner, p, b, kind, route, ct);
         if (kind == "settings")
         {
             var s = await UserSettings(owner, ct); var place = b["place"]!;
@@ -193,11 +196,13 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
         }
         if (kind == "createOccurrence")
         {
-            var d = await FindDefinition(owner, RouteId(route), ct); var date = TimeRules.Date(Wire.Str(b, "logicalDate"));
+            var d = await FindDefinition(owner, RouteId(route), ct); DateOnly? date = b["logicalDate"] is null ? null : TimeRules.Date(Wire.Str(b, "logicalDate"));
             if (d.Version != Wire.Str(b, "definitionVersion")) throw new DomainError(412, "staleDefinition", new JsonObject { ["currentServerVersion"] = d.Version, ["currentDefinition"] = Definition(d) }, ApiReply.Quote(d.Version));
             var id = Wire.Id(b, "id"); if (await db.Occurrences.AnyAsync(x => x.UserId == owner && x.Id == id, ct)) throw new DomainError(409, "idUnavailable");
-            var occurrence = new OccurrenceRow { UserId = owner, Id = id, DefinitionId = d.Id, PlaceId = d.PlaceId, LogicalDate = date, SourceDefinitionVersion = d.Version, SnapshotJson = Wire.Json(Snapshot(Wire.Obj(d.FieldsJson))) };
-            db.Occurrences.Add(occurrence); p.InputRevision++;
+            var intent = b["timeIntent"]?.AsObject(); var resolution = TimingRules.Resolve(Snapshot(Wire.Obj(d.FieldsJson)), date, intent, true);
+            var occurrence = new OccurrenceRow { UserId = owner, Id = id, DefinitionId = d.Id, PlaceId = d.PlaceId, LogicalDate = date, SourceDefinitionVersion = d.Version };
+            TimingRules.Store(occurrence, intent, resolution); db.Occurrences.Add(occurrence); p.InputRevision++;
+            if (await TimingRules.AutoPlace(db, occurrence, resolution, ct)) p.ScheduleRevision++;
             return ApiReply.Json(Envelope("occurrence", Occurrence(occurrence), p), 201, occurrence.Version, "/api/v1/occurrences/" + id.ToString("D"));
         }
         var o = await FindOccurrence(owner, RouteId(route), ct);
@@ -214,17 +219,19 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
         if (kind == "updateOccurrence")
         {
             var snapshot = b["constraintsSnapshot"]!;
-            await References(owner, snapshot, false, ct); var date = TimeRules.Date(Wire.Str(b, "logicalDate"));
+            await References(owner, snapshot, false, ct); DateOnly? date = b["logicalDate"] is null ? null : TimeRules.Date(Wire.Str(b, "logicalDate"));
             Match(ctx, o.Version, "currentOccurrence", Occurrence(o));
+            var intent = b.ContainsKey("timeIntent") ? b["timeIntent"]?.AsObject() : o.TimeIntentJson is null ? null : Wire.Obj(o.TimeIntentJson);
+            var resolution = TimingRules.Resolve(snapshot.AsObject(), date, intent, true);
             if (o.Block is not null)
             {
                 var old = Wire.Obj(o.SnapshotJson);
                 if (Wire.Str(old, "mobilityPolicy") == "fixedAfterPlacement" && Wire.Str(snapshot, "mobilityPolicy") == "movable" && !Wire.Bool(b, "allowFixedChange")) throw new DomainError(409, "fixedChangeRequiresConfirmation");
-                if ((o.Block.End - o.Block.Start).TotalMinutes != Wire.Int(snapshot["durationPolicy"]!, "requiredWorkMinutes")) throw new DomainError(409, "invalidExistingPlacement");
+                if (date is null || U1Projection.Work(resolution.Constraints) is not int required || (o.Block.End - o.Block.Start).Ticks != (long)required * TimeSpan.TicksPerMinute) throw new DomainError(409, "invalidExistingPlacement");
                 try { TimeRules.CheckAvailability(snapshot["availabilityRules"]!, o.Block.Start, o.Block.End, ct); }
                 catch (DomainError) { throw new DomainError(409, "invalidExistingPlacement"); }
             }
-            o.LogicalDate = date; o.PlaceId = Wire.Id(snapshot, "placeId"); o.SnapshotJson = Wire.Json(snapshot); o.Version = Versions.New(); p.InputRevision++;
+            o.LogicalDate = date; o.PlaceId = Wire.Id(snapshot, "placeId"); TimingRules.Store(o, intent, resolution); if (o.Block is not null) o.PlacementIssue = null; o.Version = Versions.New(); p.InputRevision++;
             return ApiReply.Json(Envelope("occurrence", Occurrence(o), p), version: o.Version);
         }
         Match(ctx, o.Version, "currentOccurrence", Occurrence(o));
@@ -236,6 +243,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
         if (!Wire.Bool(b, "allowFixedChange") && ((action is "move" or "unplace") && effectiveFixed || action == "setFixed" && block!.Fixed && !Wire.Bool(b, "fixed"))) throw new DomainError(409, "fixedChangeRequiresConfirmation");
         if (action is "place" or "move")
         {
+            if (o.LogicalDate is null || U1Projection.Work(saved) is null) Wire.Bad();
             var start = TimeRules.Resolve(TimeRules.Local(Wire.Str(b, "localStart")), TimeRules.Zone(Wire.Str(b, "timezone")), Wire.Str(b, "utcOffset"));
             DateTime end; try { end = start.AddMinutes(Wire.Int(saved["durationPolicy"]!, "requiredWorkMinutes")); } catch (ArgumentOutOfRangeException) { Wire.Bad(); throw; }
             TimeRules.CheckAvailability(saved["availabilityRules"]!, start, end, ct);
@@ -246,7 +254,7 @@ public sealed class D1Service(VibeDb db, IDataProtectionProvider protection, Tim
         }
         else if (action == "setFixed") { block!.Fixed = Wire.Bool(b, "fixed"); block.Version = Versions.New(); }
         else { db.Blocks.Remove(block!); o.Block = null; }
-        o.Version = Versions.New(); p.InputRevision++; p.ScheduleRevision++;
+        o.PlacementIssue = null; o.Version = Versions.New(); p.InputRevision++; p.ScheduleRevision++;
         return ApiReply.Json(Envelope("occurrence", Occurrence(o), p), version: o.Version);
     }
     public async Task<ApiReply> Read(HttpContext ctx, string kind, string? route = null)

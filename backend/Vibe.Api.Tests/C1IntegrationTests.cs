@@ -22,7 +22,7 @@ public partial class ApiIntegrationTests
     static async Task<JsonObject> C1Response(HttpResponseMessage response)
     {
         var body = await Json(response);
-        Wire.Validate(body, "OccurrenceResponse");
+        Wire.Validate(body, "OccurrenceResponseU1");
         Assert.Equal(C1ETag(body), response.Headers.ETag!.ToString());
         return body;
     }
@@ -35,7 +35,7 @@ public partial class ApiIntegrationTests
     }
     static JsonObject C1Edit(JsonObject state, int? minutes = null)
     {
-        var body = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2026-10-14", ["constraintsSnapshot"] = C1Occ(state)["constraintsSnapshot"]!.DeepClone(), ["allowFixedChange"] = false };
+        var body = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2026-10-14", ["constraintsSnapshot"] = LegacyTestWire.Constraints(C1Occ(state)["constraintsSnapshot"]!), ["allowFixedChange"] = false };
         if (minutes is int n) body["constraintsSnapshot"]!["durationPolicy"]!["requiredWorkMinutes"] = n;
         return body;
     }
@@ -77,7 +77,7 @@ public partial class ApiIntegrationTests
             var afterComplete = await C1Counters(client, completed);
             Assert.Equal(initial.Input + 1, afterComplete.Input); Assert.Equal(initial.Schedule, afterComplete.Schedule); Assert.Equal(1, afterComplete.Active);
             var first = await C1StoredFact(firstId); string firstContext = first.OccurrenceSnapshotJson;
-            Assert.Equal(3, Wire.Obj(firstContext).Count); Assert.Equal(90, Wire.Int(Wire.Obj(firstContext)["constraintsSnapshot"]!["durationPolicy"]!, "requiredWorkMinutes"));
+            Assert.Equal(5, Wire.Obj(firstContext).Count); Assert.Null(Wire.Obj(firstContext)["timeIntent"]); Assert.Null(Wire.Obj(firstContext)["resolvedTiming"]); Assert.Equal(90, Wire.Int(Wire.Obj(firstContext)["constraintsSnapshot"]!["durationPolicy"]!, "requiredWorkMinutes"));
             C1Fixture.Clock.Advance(TimeSpan.FromMinutes(1));
             var noOp = await C1Response(await C1Complete(client, completed));
             Assert.True(JsonNode.DeepEquals(completed, noOp)); Assert.Equal(afterComplete, await C1Counters(client, noOp));
@@ -136,7 +136,7 @@ public partial class ApiIntegrationTests
         var block = C1Occ(completed)["calendarBlock"]!;
         DateTime from = TimeRules.Utc(Wire.Str(block, "startInstant")).AddHours(-2), to = TimeRules.Utc(Wire.Str(block, "endInstant")).AddHours(2);
         var calendar = await Json(await client.GetAsync("/api/v1/calendar?from=" + Uri.EscapeDataString(TimeRules.Instant(from)) + "&to=" + Uri.EscapeDataString(TimeRules.Instant(to))));
-        Wire.Validate(calendar, "CalendarResponse"); Assert.True(JsonNode.DeepEquals(block, calendar["blocks"]![0]));
+        Wire.Validate(calendar, "CalendarResponseU1"); Assert.True(JsonNode.DeepEquals(block, calendar["blocks"]![0]));
         Assert.Equal(90, (TimeRules.Utc(Wire.Str(block, "endInstant")) - TimeRules.Utc(Wire.Str(block, "startInstant"))).TotalMinutes);
         var other = await Occurrence(client, definition);
         var overlap = Placement(other, local, "+02:00"); overlap["timezone"] = "Europe/Berlin";

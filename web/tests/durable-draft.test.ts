@@ -16,7 +16,7 @@ test('restored baseline equals unchanged server DTO despite JSONB property order
   assert.equal(sameData(undefined, null), false)
   assert.equal(sameData({ a: undefined }, {}), false)
 })
-test('select submitted A then newer B of one draft remounts chosen revision and keeps separately edited copies', async () => {
+test('select submitted A then saved B keeps stable draft id, does not write on open, and rejects stale A save', async () => {
   const storage = new MemoryStorage()
   for (const key of ['settings', 'new-category', 'new-definition', 'definition:task', 'create-occurrence:task', 'occurrence:task', 'placement:task']) {
     const submitted: DraftRecord = { userId: 'anna', draftId: crypto.randomUUID(), key, value: { name: 'Отправлено A' }, base: { serverVersion: 'v1' }, revision: 1, updatedAt: 1 }
@@ -24,8 +24,8 @@ test('select submitted A then newer B of one draft remounts chosen revision and 
     await storage.saveDraft(newer)
     const a = selectRestoration(submitted)
     const openedA = openEditorDraft('anna', key, {}, {}, a.record)
-    const continuedA = { ...openedA, revision: 2, value: { name: 'Правка копии A' } }
-    await storage.saveDraft(continuedA)
+    const continuedA = { ...openedA, revision: 2, value: { name: 'Несохранённая правка A' } }
+    assert.equal(await storage.saveDraftCas(continuedA, submitted.revision), false)
     const b = selectRestoration(newer)
     // App uses this selection token as the React key for every restored form;
     // initial-only state therefore initializes from B, even with the same id.
@@ -33,11 +33,11 @@ test('select submitted A then newer B of one draft remounts chosen revision and 
     const openedB = openEditorDraft('anna', key, {}, {}, b.record)
     assert.deepEqual(openedB.value, { name: 'Новый ввод B' })
     assert.deepEqual(openedB.base, { serverVersion: 'v2' })
-    assert.notEqual(openedB.draftId, openedA.draftId)
-    await storage.saveDraft(openedB)
+    assert.equal(openedB.draftId, openedA.draftId)
+    assert.equal(openedB.draftId, newer.draftId)
     const saved = await storage.drafts('anna')
     assert.deepEqual(saved.find(row => row.draftId === newer.draftId), newer)
-    assert.deepEqual(saved.find(row => row.draftId === continuedA.draftId)?.value, { name: 'Правка копии A' })
+    assert.equal(saved.filter(row => row.draftId === newer.draftId).length, 1)
     assert.deepEqual(submitted.value, { name: 'Отправлено A' })
     assert.notEqual(selectRestoration(newer).editorKey, b.editorKey)
   }

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Vibe.Api.Data;
 using Vibe.Api.Features.D1;
+using Vibe.Api.Features.Recurrence;
 
 namespace Vibe.Api.Features.Sync;
 
@@ -101,6 +102,7 @@ public sealed class SyncService(VibeDb db, SyncCursor cursors, TimeProvider cloc
             await foreach (var c in db.Categories.AsNoTracking().Where(c => c.UserId == owner).OrderBy(c => c.Id).Take(limits.MaxSnapshotItems - rows.Count + 1).AsAsyncEnumerable().WithCancellation(build)) Add(SyncProjection.Item("category", D1Service.Category(c)));
             await foreach (var d in db.Definitions.AsNoTracking().Where(d => d.UserId == owner).OrderBy(d => d.Id).Take(limits.MaxSnapshotItems - rows.Count + 1).AsAsyncEnumerable().WithCancellation(build)) Add(SyncProjection.Item("definition", D1Service.Definition(d)));
             await foreach (var o in SyncProjection.Occurrences(db).AsSingleQuery().Where(o => o.UserId == owner).OrderBy(o => o.Id).Take(limits.MaxSnapshotItems - rows.Count + 1).AsAsyncEnumerable().WithCancellation(build)) Add(SyncProjection.Item("occurrence", D1Service.Occurrence(o)));
+            await foreach (var r in db.RecurrenceRules.AsNoTracking().Where(r => r.UserId == owner).OrderBy(r => r.Id).Take(limits.MaxSnapshotItems - rows.Count + 1).AsAsyncEnumerable().WithCancellation(build)) Add(SyncProjection.Item("recurrence", RecurrenceService.Rule(r)));
             db.SyncSnapshots.Add(snapshot); db.SyncSnapshotItems.AddRange(rows);
             await db.SaveChangesAsync(build);
             // Do not reload jsonb: size accounting and the initial page use the same compact JSON.
@@ -122,9 +124,9 @@ public sealed class SyncService(VibeDb db, SyncCursor cursors, TimeProvider cloc
     }
     ApiReply Page(string owner, SyncSnapshotRow snapshot, List<string> items, int? next) => ApiReply.Json(new JsonObject
     {
-        ["protocol"] = "s1", ["streamId"] = snapshot.StreamId.ToString("D"), ["snapshotId"] = snapshot.Id.ToString("D"),
+        ["protocol"] = "s3", ["streamId"] = snapshot.StreamId.ToString("D"), ["snapshotId"] = snapshot.Id.ToString("D"),
         ["expiresAt"] = Instant(snapshot.ExpiresAtUtc), ["asOfCursor"] = snapshot.AsOfCursor, ["planState"] = Wire.Obj(snapshot.PlanStateJson),
-        ["items"] = new JsonArray(items.Select(j => (JsonNode?)Wire.Obj(j)).ToArray()),
+        ["items"] = new JsonArray(items.Select(j => (JsonNode?)U1Projection.CheckedItem(j)).ToArray()),
         ["nextPageCursor"] = next is null ? null : cursors.Page(owner, new BootstrapPosition(snapshot.StreamId, snapshot.Id, next.Value, snapshot.PageSize))
     });
     public async Task<ApiReply> Changes(HttpContext ctx)
@@ -147,8 +149,8 @@ public sealed class SyncService(VibeDb db, SyncCursor cursors, TimeProvider cloc
         var next = more ? new DeltaPosition(stream.StreamId, expected, horizon, pageSize) : new DeltaPosition(stream.StreamId, horizon);
         var reply = ApiReply.Json(new JsonObject
         {
-            ["protocol"] = "s1", ["streamId"] = stream.StreamId.ToString("D"),
-            ["changes"] = new JsonArray(emitted.Select(c => (JsonNode?)new JsonObject { ["id"] = c.ChangeId.ToString("D"), ["opId"] = c.OpId.ToString("D"), ["item"] = Wire.Obj(c.ItemJson), ["planState"] = Wire.Obj(c.PlanStateJson) }).ToArray()),
+            ["protocol"] = "s3", ["streamId"] = stream.StreamId.ToString("D"),
+            ["changes"] = new JsonArray(emitted.Select(c => (JsonNode?)new JsonObject { ["id"] = c.ChangeId.ToString("D"), ["opId"] = c.OpId.ToString("D"), ["item"] = U1Projection.CheckedItem(c.ItemJson), ["planState"] = Wire.Obj(c.PlanStateJson) }).ToArray()),
             ["nextCursor"] = cursors.Delta(owner, next), ["hasMore"] = more
         });
         await tx.CommitAsync(ct); return reply;

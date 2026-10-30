@@ -48,9 +48,12 @@ public class OccurrenceRow
     public Guid Id { get; set; }
     public Guid DefinitionId { get; set; }
     public Guid PlaceId { get; set; }
-    public DateOnly LogicalDate { get; set; }
+    public DateOnly? LogicalDate { get; set; }
     public string SourceDefinitionVersion { get; set; } = "";
     public string SnapshotJson { get; set; } = "{}";
+    public string? TimeIntentJson { get; set; }
+    public string? ResolvedTimingJson { get; set; }
+    public string? PlacementIssue { get; set; }
     public string Version { get; set; } = Versions.New();
     public BlockRow? Block { get; set; }
     public ICollection<CompletionRow> Completions { get; set; } = new List<CompletionRow>();
@@ -103,11 +106,14 @@ public class VibeDb(DbContextOptions<VibeDb> options) : IdentityDbContext<VibeUs
     public DbSet<SyncChangeRow> SyncChanges => Set<SyncChangeRow>();
     public DbSet<SyncSnapshotRow> SyncSnapshots => Set<SyncSnapshotRow>();
     public DbSet<SyncSnapshotItemRow> SyncSnapshotItems => Set<SyncSnapshotItemRow>();
+    public DbSet<RecurrenceRuleRow> RecurrenceRules => Set<RecurrenceRuleRow>();
+    public DbSet<RecurrenceSlotRow> RecurrenceSlots => Set<RecurrenceSlotRow>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
         SyncModel.Configure(b);
+        RecurrenceModel.Configure(b);
         b.Entity<SettingsRow>().ToTable("UserSettings").HasKey(x => x.UserId);
         b.Entity<SettingsRow>().HasOne<VibeUser>().WithOne().HasForeignKey<SettingsRow>(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<PlanRow>().ToTable("UserPlanState").HasKey(x => x.UserId);
@@ -123,6 +129,8 @@ public class VibeDb(DbContextOptions<VibeDb> options) : IdentityDbContext<VibeUs
         b.Entity<DefinitionRow>().HasOne<PlaceRow>().WithMany().HasForeignKey(x => new { x.UserId, x.PlaceId }).OnDelete(DeleteBehavior.Restrict);
         b.Entity<OccurrenceRow>().ToTable("TaskOccurrences").HasKey(x => new { x.UserId, x.Id });
         b.Entity<OccurrenceRow>().Property(x => x.SnapshotJson).HasColumnType("jsonb");
+        b.Entity<OccurrenceRow>().Property(x => x.TimeIntentJson).HasColumnType("jsonb");
+        b.Entity<OccurrenceRow>().Property(x => x.ResolvedTimingJson).HasColumnType("jsonb");
         b.Entity<OccurrenceRow>().HasOne<DefinitionRow>().WithMany().HasForeignKey(x => new { x.UserId, x.DefinitionId }).OnDelete(DeleteBehavior.Restrict);
         b.Entity<OccurrenceRow>().HasOne<PlaceRow>().WithMany().HasForeignKey(x => new { x.UserId, x.PlaceId }).OnDelete(DeleteBehavior.Restrict);
         b.Entity<BlockRow>().ToTable("CalendarBlocks", t => t.HasCheckConstraint("CK_Block_Positive", "\"End\" > \"Start\""));
@@ -148,7 +156,7 @@ public class VibeDbFactory : IDesignTimeDbContextFactory<VibeDb>
     {
         // A schema-only design connection; migration creation never reads development secrets.
         var connection = Environment.GetEnvironmentVariable("VIBE_MIGRATION_CONNECTION")
-            ?? "Host=127.0.0.1;Port=54329;Database=vibe;Username=vibe";
+            ?? "Host=127.0.0.1;Port=15432;Database=vibe;Username=vibe";
         return new VibeDb(new DbContextOptionsBuilder<VibeDb>().UseNpgsql(connection).Options);
     }
 }

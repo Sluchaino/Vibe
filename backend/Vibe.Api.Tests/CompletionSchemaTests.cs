@@ -22,7 +22,7 @@ public class CompletionSchemaTests
     [InlineData(true, true)]
     public void CurrentOccurrenceProjectionSatisfiesConditionalCompletionAndPlacementSchemas(bool completed, bool planned)
     {
-        var state = State(completed, planned); Wire.Validate(state, "TaskOccurrence");
+        var state = State(completed, planned); Wire.Validate(state, "TaskOccurrenceU1");
         Assert.Equal(completed ? 0 : 90, Wire.Int(state, "remainingWorkMinutes"));
         if (completed) Wire.Validate(state["completion"], "ActiveCompletion");
     }
@@ -42,11 +42,11 @@ public class CompletionSchemaTests
         foreach (var mutate in invalid)
         {
             var state = State(true, true); mutate(state);
-            Assert.Equal("validationFailed", Assert.Throws<DomainError>(() => Wire.Validate(state, "TaskOccurrence")).Code);
+            Assert.Equal("validationFailed", Assert.Throws<DomainError>(() => Wire.Validate(state, "TaskOccurrenceU1")).Code);
         }
         var incomplete = State(false, false); incomplete["remainingWorkMinutes"] = 0;
-        Assert.Throws<DomainError>(() => Wire.Validate(incomplete, "TaskOccurrence"));
-        var legacy = State(false, false); legacy.Remove("completion"); legacy.Remove("completionStatus");
-        Assert.Throws<DomainError>(() => Wire.Validate(legacy, "TaskOccurrence")); Wire.Validate(legacy, "TaskOccurrenceLegacyD1");
+        Assert.Throws<DomainError>(() => Wire.Validate(incomplete, "TaskOccurrenceU1"));
+        var legacy = LegacyTestWire.Occurrence(State(false, false)); legacy.Remove("completion"); legacy.Remove("completionStatus");
+        Assert.Throws<DomainError>(() => Wire.Validate(legacy, "TaskOccurrenceU1")); Wire.Validate(legacy, "TaskOccurrenceLegacyD1");
     }
 }

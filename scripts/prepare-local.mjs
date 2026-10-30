@@ -29,6 +29,9 @@ if (await exists(configPath)) {
       !samePath(config.LocalHttps.KeyPath, path.join(tools, 'certs', 'localhost.key'))) {
     throw new Error('Existing TLS paths do not match this workspace. Configuration was not overwritten. See docs/DEV_ENVIRONMENT.md.');
   }
+  if ([config.ConnectionStrings.Vibe, config.ConnectionStrings.VibeTests].some(value => /(?:^|;)\s*Port\s*=\s*(?:54329|55432)\s*(?:;|$)/i.test(value))) {
+    throw new Error('Compose now binds PostgreSQL to loopback port 15432. Update only the old Port=54329 or Port=55432 to Port=15432 in ConnectionStrings.Vibe and VibeTests; keep passwords and the existing volume. Configuration was not overwritten. See README.md.');
+  }
   console.log('Existing local configuration preserved; passwords were not rotated.');
 } else {
   if (await exists(path.join(secretsDir, 'pg-admin-password')) ||
@@ -39,8 +42,8 @@ if (await exists(configPath)) {
   const appPassword = randomBytes(32).toString('hex');
   const config = {
     ConnectionStrings: {
-      Vibe: `Host=127.0.0.1;Port=54329;Database=vibe;Username=vibe;Password=${appPassword}`,
-      VibeTests: `Host=127.0.0.1;Port=54329;Database=vibe_d1_tests;Username=vibe;Password=${appPassword}`,
+      Vibe: `Host=127.0.0.1;Port=15432;Database=vibe;Username=vibe;Password=${appPassword}`,
+      VibeTests: `Host=127.0.0.1;Port=15432;Database=vibe_d1_tests;Username=vibe;Password=${appPassword}`,
     },
     LocalDevelopment: {
       SeedUsers: ['anna@vibe.local', 'boris@vibe.local'].map((userName) => ({

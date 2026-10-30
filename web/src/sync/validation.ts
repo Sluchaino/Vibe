@@ -56,5 +56,5 @@ export function normalizeReceived<T>(value: T): T {
   }
   return normalize(value) as T
 }
-export const bootstrapPage = (value: unknown) => normalizeReceived(validateWire<BootstrapPage>(value, 'BootstrapPage'))
-export const changesPage = (value: unknown) => normalizeReceived(validateWire<ChangesPage>(value, 'ChangesPage'))
+export const bootstrapPage = (value: unknown) => normalizeReceived(validateWire<BootstrapPage>(value, 'BootstrapPageV3'))
+export const changesPage = (value: unknown) => normalizeReceived(validateWire<ChangesPage>(value, 'ChangesPageV3'))

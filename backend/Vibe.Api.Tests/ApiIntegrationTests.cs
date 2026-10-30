@@ -51,13 +51,13 @@ public partial class ApiIntegrationTests(PostgresFixture fixture) : IClassFixtur
     async Task<JsonObject> Definition(HttpClient c, int minutes = 90, string mobility = "movable", JsonObject? availability = null)
     {
         var b = await DefinitionBody(c, minutes, mobility, availability);
-        var result = await Json(await Send(c, HttpMethod.Post, "/api/v1/task-definitions", b), HttpStatusCode.Created); Wire.Validate(result, "DefinitionResponse"); return result;
+        var result = await Json(await Send(c, HttpMethod.Post, "/api/v1/task-definitions", b), HttpStatusCode.Created); Wire.Validate(result, "DefinitionResponseU1"); return result;
     }
     static async Task<JsonObject> Occurrence(HttpClient c, JsonObject definition, string logicalDate = "2026-10-12")
     {
         var d = definition["definition"]!;
         var body = new JsonObject { ["opId"] = Id(), ["id"] = Id(), ["definitionVersion"] = Wire.Str(d, "serverVersion"), ["logicalDate"] = logicalDate };
-        var result = await Json(await Send(c, HttpMethod.Post, "/api/v1/task-definitions/" + Wire.Str(d, "id") + "/occurrences", body), HttpStatusCode.Created); Wire.Validate(result, "OccurrenceResponse"); return result;
+        var result = await Json(await Send(c, HttpMethod.Post, "/api/v1/task-definitions/" + Wire.Str(d, "id") + "/occurrences", body), HttpStatusCode.Created); Wire.Validate(result, "OccurrenceResponseU1"); return result;
     }
     static JsonObject Placement(JsonObject occurrence, string local, string offset = "+03:00", string action = "place", bool allow = false)
     {
@@ -68,7 +68,7 @@ public partial class ApiIntegrationTests(PostgresFixture fixture) : IClassFixtur
     static Task<HttpResponseMessage> Place(HttpClient c, JsonObject occurrence, JsonObject body) => Send(c, HttpMethod.Post, "/api/v1/occurrences/" + Wire.Str(occurrence["occurrence"]!, "id") + "/placement", body, ApiReply.Quote(Wire.Str(occurrence["occurrence"]!, "serverVersion")));
     static async Task<JsonObject> Error(HttpResponseMessage r, HttpStatusCode status, string code)
     {
-        var result = await Json(r, status); Assert.Equal("application/problem+json", r.Content.Headers.ContentType!.MediaType); Wire.Validate(result, "ProblemDetails"); Assert.Equal(code, Wire.Str(result, "code")); return result;
+        var result = await Json(r, status); Assert.Equal("application/problem+json", r.Content.Headers.ContentType!.MediaType); Wire.Validate(result, "ProblemDetailsU1"); Assert.Equal(code, Wire.Str(result, "code")); return result;
     }
     [Fact]
     public async Task AuthenticationCsrfCookieFlagsLogoutAndAbsoluteExpiry()
@@ -137,7 +137,7 @@ public partial class ApiIntegrationTests(PostgresFixture fixture) : IClassFixtur
         var dst = await Occurrence(c, await Definition(c)); var command = Placement(dst, "2026-10-25T02:30:00", "+02:00"); command["timezone"] = "Europe/Berlin";
         var planned = await Json(await Place(c, dst, command)); var block = planned["occurrence"]!["calendarBlock"]!;
         Assert.Equal("2026-10-25T00:30:00Z", Wire.Str(block, "startInstant")); Assert.Equal("2026-10-25T02:00:00Z", Wire.Str(block, "endInstant")); Assert.Equal(90, Wire.Int(planned["occurrence"]!, "remainingWorkMinutes"));
-        var calendar = await Json(await c.GetAsync("/api/v1/calendar?from=2026-10-25T00%3A00%3A00Z&to=2026-10-26T00%3A00%3A00Z")); Wire.Validate(calendar, "CalendarResponse"); Assert.Contains(calendar["blocks"]!.AsArray(), x => Wire.Str(x!, "id") == Wire.Str(block, "id"));
+        var calendar = await Json(await c.GetAsync("/api/v1/calendar?from=2026-10-25T00%3A00%3A00Z&to=2026-10-26T00%3A00%3A00Z")); Wire.Validate(calendar, "CalendarResponseU1"); Assert.Contains(calendar["blocks"]!.AsArray(), x => Wire.Str(x!, "id") == Wire.Str(block, "id"));
     }
     [Fact]
     public async Task FixedConfirmationCannotBeBypassedViaSnapshotAndNoHiddenResize()
@@ -145,7 +145,7 @@ public partial class ApiIntegrationTests(PostgresFixture fixture) : IClassFixtur
         using var c = await Login(); var o = await Occurrence(c, await Definition(c, mobility: "fixedAfterPlacement"));
         var planned = await Json(await Place(c, o, Placement(o, "2030-01-01T18:00:00")));
         await Error(await Place(c, planned, Placement(planned, "2030-01-01T20:00:00", action: "move")), HttpStatusCode.Conflict, "fixedChangeRequiresConfirmation");
-        var edit = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2030-01-01", ["constraintsSnapshot"] = planned["occurrence"]!["constraintsSnapshot"]!.DeepClone(), ["allowFixedChange"] = false };
+        var edit = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2030-01-01", ["constraintsSnapshot"] = LegacyTestWire.Constraints(planned["occurrence"]!["constraintsSnapshot"]!), ["allowFixedChange"] = false };
         edit["constraintsSnapshot"]!["mobilityPolicy"] = "movable"; string path = "/api/v1/occurrences/" + Wire.Str(planned["occurrence"]!, "id"); string etag = ApiReply.Quote(Wire.Str(planned["occurrence"]!, "serverVersion"));
         await Error(await Send(c, HttpMethod.Put, path, edit, etag), HttpStatusCode.Conflict, "fixedChangeRequiresConfirmation");
         NewOp(edit); edit["allowFixedChange"] = true; edit["constraintsSnapshot"]!["durationPolicy"]!["requiredWorkMinutes"] = 60;
@@ -346,7 +346,7 @@ public partial class ApiIntegrationTests(PostgresFixture fixture) : IClassFixtur
         {
             string path = "/api/v1/occurrences/" + id;
             await Error(await boris.GetAsync(path), HttpStatusCode.NotFound, "notFound");
-            var update = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2026-10-12", ["constraintsSnapshot"] = ownOccurrence["occurrence"]!["constraintsSnapshot"]!.DeepClone(), ["allowFixedChange"] = false };
+            var update = new JsonObject { ["opId"] = Id(), ["logicalDate"] = "2026-10-12", ["constraintsSnapshot"] = LegacyTestWire.Constraints(ownOccurrence["occurrence"]!["constraintsSnapshot"]!), ["allowFixedChange"] = false };
             await Error(await Send(boris, HttpMethod.Put, path, update, "\"validVersion\""), HttpStatusCode.NotFound, "notFound");
             await Error(await Send(boris, HttpMethod.Post, path + "/placement", Placement(ownOccurrence, "2037-01-01T10:00:00"), "\"validVersion\""), HttpStatusCode.NotFound, "notFound");
         }

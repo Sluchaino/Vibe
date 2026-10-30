@@ -3,12 +3,18 @@ export type Version = string
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 export type MobilityPolicy = 'movable' | 'fixedAfterPlacement'
 export interface FixedWorkDuration { mode: 'fixedWork'; requiredWorkMinutes: number }
+export type WorkOrigin = 'manual' | 'interval' | 'unspecified'
+export type DstDisambiguation = 'earlier' | 'later' | null
+export interface TimeIntent { timezone: string; startLocalTime: string | null; endLocalTime: string | null; endDayOffset: number; startDisambiguation: DstDisambiguation; endDisambiguation: DstDisambiguation }
+export interface ResolvedTiming { startInstant: string; endInstant: string }
+export type PlacementIssue = 'invalidLocalTime' | 'ambiguousLocalTime' | 'workMismatch' | 'placementConflict' | 'outsideAvailability' | 'outOfRange'
 export interface AvailabilityWindow { daysOfWeek: DayOfWeek[]; startLocalTime: string; endLocalTime: string; endDayOffset: 0 | 1 }
 export interface ExceptionWindow { startLocalTime: string; endLocalTime: string; endDayOffset: 0 | 1; startUtcOffset: string; endUtcOffset: string }
 export interface AvailabilityDateException { localDate: string; windows: ExceptionWindow[] }
 export interface AvailabilityRules { timezone: string; windows: AvailabilityWindow[]; dateExceptions: AvailabilityDateException[] }
 export interface ConstraintsSnapshot {
-  durationPolicy: FixedWorkDuration
+  durationPolicy: FixedWorkDuration | null
+  workOrigin: WorkOrigin
   splitAllowed: false
   mobilityPolicy: MobilityPolicy
   availabilityRules: AvailabilityRules
@@ -35,27 +41,36 @@ export type CompletionStatus = 'incomplete' | 'completed'
 export interface TaskOccurrence {
   id: string
   definitionId: string
-  logicalDate: string
+  logicalDate: string | null
   sourceDefinitionVersion: Version
   constraintsSnapshot: ConstraintsSnapshot
-  remainingWorkMinutes: number
+  remainingWorkMinutes: number | null
   placementStatus: 'unplanned' | 'planned'
   calendarBlock: CalendarBlock | null
   serverVersion: Version
   completionStatus: CompletionStatus
   completion: ActiveCompletion | null
+  timeIntent: TimeIntent | null
+  resolvedTiming: ResolvedTiming | null
+  placementIssue: PlacementIssue | null
 }
-export type TaskOccurrenceLegacyD1 = Omit<TaskOccurrence, 'completionStatus' | 'completion'>
+export type TaskOccurrenceLegacyC1 = Omit<TaskOccurrence, 'timeIntent' | 'resolvedTiming' | 'placementIssue' | 'logicalDate' | 'remainingWorkMinutes' | 'constraintsSnapshot'> & { logicalDate: string; remainingWorkMinutes: number; constraintsSnapshot: Omit<ConstraintsSnapshot, 'workOrigin' | 'durationPolicy'> & { durationPolicy: FixedWorkDuration } }
+export type TaskOccurrenceLegacyD1 = Omit<TaskOccurrenceLegacyC1, 'completionStatus' | 'completion'>
 export interface PlanState { planningInputRevision: Version; scheduleVersion: Version }
-export type SyncItem = { kind: 'settings'; value: UserSettings } | { kind: 'category'; value: Category } | { kind: 'definition'; value: TaskDefinition } | { kind: 'occurrence'; value: TaskOccurrence }
-export interface BootstrapPage { protocol: 's1'; streamId: string; snapshotId: string; expiresAt: string; asOfCursor: string; planState: PlanState; items: SyncItem[]; nextPageCursor: string | null }
+interface RecurrenceBase { id: string; definitionId: string; timezone: string; startDate: string; endDate: string | null; enabled: boolean; generatedThrough: string | null; serverVersion: Version; timeIntent: TimeIntent | null }
+export type RecurrenceRule = RecurrenceBase & ({ pattern: 'weekly'; daysOfWeek: DayOfWeek[] } | { pattern: 'interval'; intervalDays: number; anchorDate: string })
+export interface RecurrenceResponse { rule: RecurrenceRule; planState: PlanState }
+export type CreateRecurrenceRuleRequest = { opId: string; id: string; definitionVersion: Version; timezone: string; startDate: string; endDate: string | null; timeIntent: TimeIntent | null } & ({ pattern: 'weekly'; daysOfWeek: DayOfWeek[] } | { pattern: 'interval'; intervalDays: number; anchorDate: string })
+export interface StopRecurrenceRuleRequest { opId: string }
+export type SyncItem = { kind: 'settings'; value: UserSettings } | { kind: 'category'; value: Category } | { kind: 'definition'; value: TaskDefinition } | { kind: 'occurrence'; value: TaskOccurrence } | { kind: 'recurrence'; value: RecurrenceRule }
+export interface BootstrapPage { protocol: 's3'; streamId: string; snapshotId: string; expiresAt: string; asOfCursor: string; planState: PlanState; items: SyncItem[]; nextPageCursor: string | null }
 export interface SyncChange { id: string; opId: string; item: SyncItem; planState: PlanState }
-export interface ChangesPage { protocol: 's1'; streamId: string; changes: SyncChange[]; nextCursor: string; hasMore: boolean }
+export interface ChangesPage { protocol: 's3'; streamId: string; changes: SyncChange[]; nextCursor: string; hasMore: boolean }
 export interface SettingsResponse { settings: UserSettings; planState: PlanState }
 export interface DefinitionResponse { definition: TaskDefinition; planState: PlanState }
 export interface CategoryResponse { category: Category; planState: PlanState }
 export interface OccurrenceResponse { occurrence: TaskOccurrence; planState: PlanState }
-export type OccurrenceMutationResponse = OccurrenceResponse | { occurrence: TaskOccurrenceLegacyD1; planState: PlanState }
+export type OccurrenceMutationResponse = OccurrenceResponse | { occurrence: TaskOccurrenceLegacyC1 | TaskOccurrenceLegacyD1; planState: PlanState }
 export interface Page<T> { items: T[]; nextCursor: string | null; planState: PlanState }
 export interface CalendarResponse { from: string; to: string; blocks: CalendarBlock[]; occurrences: TaskOccurrence[]; definitions: TaskDefinition[]; planState: PlanState }
 export interface MeResponse { userId: string; userName: string }
@@ -64,8 +79,8 @@ export interface UpdateSettingsRequest { opId: string; timezone: string; weekSta
 export interface CreateCategoryRequest { opId: string; id: string; name: string }
 export interface CreateDefinitionRequest extends DefinitionFields { opId: string; id: string }
 export interface UpdateDefinitionRequest extends DefinitionFields { opId: string }
-export interface CreateOccurrenceRequest { opId: string; id: string; definitionVersion: Version; logicalDate: string }
-export interface UpdateOccurrenceRequest { opId: string; logicalDate: string; constraintsSnapshot: ConstraintsSnapshot; allowFixedChange: boolean }
+export interface CreateOccurrenceRequest { opId: string; id: string; definitionVersion: Version; logicalDate: string | null; timeIntent: TimeIntent | null }
+export interface UpdateOccurrenceRequest { opId: string; logicalDate: string | null; constraintsSnapshot: ConstraintsSnapshot; timeIntent: TimeIntent | null; allowFixedChange: boolean }
 export interface CompleteOccurrenceRequest { opId: string }
 export interface ReopenOccurrenceRequest { opId: string; completionId: string }
 interface PlacementBase { opId: string; baseScheduleVersion: Version; allowFixedChange: boolean }
@@ -80,7 +95,7 @@ export interface ProblemDetails {
   currentPlanState?: PlanState
   currentSettings?: UserSettings
   currentDefinition?: TaskDefinition
-  currentOccurrence?: TaskOccurrence | TaskOccurrenceLegacyD1
+  currentOccurrence?: TaskOccurrence | TaskOccurrenceLegacyC1 | TaskOccurrenceLegacyD1
   conflictingBlockIds?: string[]
   validUtcOffsets?: string[]
 }

@@ -34,7 +34,7 @@ test('mixed snapshot page and unknown nested fields stop without publishing or a
   assert.equal(coordinator.snapshot().status, 'stopped')
   const page = bootstrap(); (page.items[2]!.value as unknown as Record<string, unknown>).futureRequired = true
   assert.throws(() => bootstrapPage(page), SyncSchemaError)
-  assert.throws(() => bootstrapPage({ ...bootstrap(), protocol: 's2' }), SyncSchemaError)
+  assert.throws(() => bootstrapPage({ ...bootstrap(), protocol: 's1' }), SyncSchemaError)
   const missing = bootstrap(); delete (missing.items[2]!.value as unknown as Record<string, unknown>).completionStatus
   assert.throws(() => bootstrapPage(missing), SyncSchemaError)
   assert.throws(() => changesPage({ ...delta(), changes: [{ id: stream, opId: stream, item: { kind: 'newThing', value: {} }, planState: plan }] }), SyncSchemaError)
@@ -158,7 +158,7 @@ test('frozen runtime schema exactly matches transitive live schemas and validate
     if (node && typeof node === 'object') return Object.fromEntries(Object.entries(node).filter(([key]) => propertyNames || !['description', 'examples', 'example', 'title', 'discriminator', 'default'].includes(key)).map(([key, value]) => [key, stripped(value, key === 'properties')]))
     return node
   }
-  collect('BootstrapPage'); collect('ChangesPage')
+  ["BootstrapPageV3","ChangesPageV3","CreateDefinitionRequestU1","UpdateDefinitionRequestU1","CreateOccurrenceRequestU1","UpdateOccurrenceRequestU1","RecurrenceResponseU1","CreateRecurrenceRuleRequestU1","StopRecurrenceRuleRequest","OccurrenceMutationResponseU1","CreateRecurrenceRuleRequest","RecurrenceResponse"].forEach(collect)
   assert.deepEqual(wireSchemas, stripped(selected, true))
   for (const [name, schema] of Object.entries(selected)) {
     for (const example of (schema as { examples?: unknown[] }).examples ?? []) assert.doesNotThrow(() => validateWire(example, name), `${name} example must match frozen wire`)

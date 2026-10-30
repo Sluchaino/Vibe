@@ -51,7 +51,7 @@ public sealed partial class SyncIntegrationTests
             await WaitForBlocked("locktype='advisory' AND objid=" + key + "::oid");
             var write = Category(session.Client, "after watermark"); await Task.Delay(50); Assert.False(write.IsCompleted);
             await transaction.CommitAsync(); released = true;
-            var snapshot = await Json(await bootstrap); Wire.Validate(snapshot, "BootstrapPage"); await write;
+            var snapshot = await Json(await bootstrap); Wire.Validate(snapshot, "BootstrapPageV3"); await write;
             Assert.Single(snapshot["items"]!.AsArray());
             var delta = await Delta(session.Client, Wire.Str(snapshot, "asOfCursor"));
             Assert.Equal("after watermark", Wire.Str(Assert.Single(delta["changes"]!.AsArray())!["item"]!["value"]!, "name"));

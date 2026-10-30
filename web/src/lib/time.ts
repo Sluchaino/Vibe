@@ -47,7 +47,18 @@ function offsetLabel(minutes: number) {
   return `${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`
 }
 export interface LocalCandidate { utcOffset: string; instant: string }
+// Calendar renders often revisit identical local minutes. Keep only bounded,
+// immutable answers; callers still own their returned array and candidates.
+const candidateCache = new Map<string, readonly Readonly<LocalCandidate>[]>()
+const CANDIDATE_CACHE_LIMIT = 128
 export function localCandidates(localStart: string, timezone: string): LocalCandidate[] {
+  const key = JSON.stringify([localStart, timezone])
+  const cached = candidateCache.get(key)
+  if (cached !== undefined) {
+    candidateCache.delete(key)
+    candidateCache.set(key, cached)
+    return cached.map(candidate => ({ ...candidate }))
+  }
   const wall = wallTimestamp(localStart)
   if (!isTimezone(timezone)) throw new Error('Укажите действительную IANA-зону, например Europe/Moscow.')
   const date = localStart.slice(0, 10)
@@ -60,12 +71,23 @@ export function localCandidates(localStart: string, timezone: string): LocalCand
     const parts = localParts(stamp, timezone)
     if (parts.date === date && parts.time === time && parts.second === '00') result.push({ utcOffset: offsetLabel(offset), instant: toUtc(stamp) })
   }
-  return result.sort((a, b) => a.instant.localeCompare(b.instant))
+  result.sort((a, b) => a.instant.localeCompare(b.instant))
+  candidateCache.set(key, Object.freeze(result.map(candidate => Object.freeze({ ...candidate }))))
+  if (candidateCache.size > CANDIDATE_CACHE_LIMIT) candidateCache.delete(candidateCache.keys().next().value!)
+  return result.map(candidate => ({ ...candidate }))
 }
 export function selectedInstant(localStart: string, timezone: string, utcOffset: string) {
   const candidate = localCandidates(localStart, timezone).find(item => item.utcOffset === utcOffset)
   if (!candidate) throw new Error('Выберите действительный UTC offset для этого времени.')
   return candidate.instant
+}
+export function resolveLocalTime(localStart: string, timezone: string, selectedOffset = ''): LocalCandidate {
+  const candidates = localCandidates(localStart, timezone)
+  if (!candidates.length) throw new Error('Это локальное время не существует из-за перевода часов. Выберите другое время.')
+  if (candidates.length === 1) return candidates[0]!
+  const selected = candidates.find(candidate => candidate.utcOffset === selectedOffset)
+  if (!selected) throw new Error('Это время встречается дважды. Выберите, какое из двух вхождений использовать.')
+  return selected
 }
 export function startOfLocalDate(date: string, timezone: string) {
   const candidates = localCandidates(`${date}T00:00:00`, timezone)
@@ -91,8 +113,8 @@ export function dateLabel(date: string, short = false) {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: short ? 'short' : 'long', day: 'numeric', month: short ? 'short' : 'long' }).format(new Date(`${date}T12:00:00Z`))
 }
 export function instantLabel(instant: string, timezone: string) {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset' }).format(new Date(instant))
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(instant))
 }
 export function completionTimeLabel(instant: string, timezone: string) {
-  return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset' }).format(new Date(instant))
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date(instant))
 }

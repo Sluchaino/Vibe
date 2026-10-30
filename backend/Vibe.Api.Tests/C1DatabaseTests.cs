@@ -22,7 +22,8 @@ public class C1DatabaseTests(PostgresFixture fixture) : IClassFixture<PostgresFi
         await using var c = new NpgsqlConnection(connection); await c.OpenAsync();
         foreach (string table in D1Tables)
         {
-            await using var command = new NpgsqlCommand("SELECT md5(COALESCE(string_agg(to_jsonb(row_value)::text, E'\\n' ORDER BY to_jsonb(row_value)::text), '')) FROM \"" + table + "\" row_value", c);
+            const string row = "(to_jsonb(row_value)-'TimeIntentJson'-'ResolvedTimingJson'-'PlacementIssue')";
+            await using var command = new NpgsqlCommand("SELECT md5(COALESCE(string_agg(" + row + "::text, E'\\n' ORDER BY " + row + "::text), '')) FROM \"" + table + "\" row_value", c);
             values[table] = (string)(await command.ExecuteScalarAsync())!;
         }
         return values;
@@ -37,7 +38,8 @@ public class C1DatabaseTests(PostgresFixture fixture) : IClassFixture<PostgresFi
         string snapshot = $$"""{"durationPolicy":{"mode":"fixedWork","requiredWorkMinutes":90},"splitAllowed":false,"mobilityPolicy":"fixedAfterPlacement","availabilityRules":{"timezone":"Europe/Moscow","windows":[],"dateExceptions":[]},"placeId":"{{place:D}}","requiredRestMinutes":0}""";
         var fields = JsonNode.Parse(snapshot)!.AsObject(); fields["title"] = "D1 migration fixture"; fields["description"] = ""; fields["categoryId"] = category.ToString("D"); fields["importance"] = "normal"; fields["difficulty"] = "medium"; fields["executionPriority"] = 3;
         db.Definitions.Add(new DefinitionRow { UserId = owner, Id = definition, CategoryId = category, PlaceId = place, FieldsJson = fields.ToJsonString(), Version = "definition_legacy" }); await db.SaveChangesAsync();
-        db.Occurrences.Add(new OccurrenceRow { UserId = owner, Id = occurrence, DefinitionId = definition, PlaceId = place, LogicalDate = new DateOnly(2026, 10, 14), SourceDefinitionVersion = "definition_legacy", SnapshotJson = snapshot, Version = "occurrence_legacy" }); await db.SaveChangesAsync();
+        // Seed the actual pre-U1 columns, even when this test is running the newer model.
+        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"TaskOccurrences\" (\"UserId\",\"Id\",\"DefinitionId\",\"PlaceId\",\"LogicalDate\",\"SourceDefinitionVersion\",\"SnapshotJson\",\"Version\") VALUES ({owner},{occurrence},{definition},{place},{new DateOnly(2026, 10, 14)},'definition_legacy',CAST({snapshot} AS jsonb),'occurrence_legacy')");
         db.Blocks.Add(new BlockRow { UserId = owner, Id = Guid.NewGuid(), OccurrenceId = occurrence, Start = new DateTime(2026, 10, 14, 12, 0, 0, DateTimeKind.Utc), End = new DateTime(2026, 10, 14, 13, 30, 0, DateTimeKind.Utc), Fixed = true, Version = "block_legacy" });
         db.Operations.Add(new OperationRow { UserId = owner, OpId = Guid.NewGuid(), Fingerprint = "legacy-fingerprint", Status = 200, Body = "{\r\n  \"old\": true\r\n}\n", ETag = "\"occurrence_legacy\"", Location = "/api/v1/occurrences/" + occurrence }); await db.SaveChangesAsync();
         return (owner, occurrence);

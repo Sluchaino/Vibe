@@ -14,5 +14,6 @@ export async function confirmedRead<T>(runtime: AccountRuntime, path: string): P
   const id = path.split('/').at(-1)!
   if (path.startsWith('/task-definitions/')) { const definition = state.definitions.get(id); if (!definition) throw new Error('Задача больше недоступна.'); return { definition, planState: state.planState } as T }
   if (path.startsWith('/occurrences/')) { const occurrence = state.occurrences.get(id); if (!occurrence) throw new Error('Выполнение больше недоступно.'); return { occurrence, planState: state.planState } as T }
+  if (path.startsWith('/recurrence-rules/')) { const rule = state.recurrences.get(id.toLowerCase()); if (!rule) throw new Error('Правило больше недоступно.'); return { rule, planState: state.planState } as T }
   throw new Error('Неизвестная запись.')
 }

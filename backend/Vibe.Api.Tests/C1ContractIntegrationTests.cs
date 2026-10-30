@@ -142,13 +142,13 @@ public partial class ApiIntegrationTests
         {
             var request = new JsonObject { ["opId"] = Id(), ["id"] = id, ["definitionVersion"] = Wire.Str(definition["definition"]!, "serverVersion"), ["logicalDate"] = "2026-10-14" };
             var response = await Send(client, HttpMethod.Post, "/api/v1/task-definitions/" + definitionId + "/occurrences", request);
-            var state = await Json(response, HttpStatusCode.Created); Wire.Validate(state, "OccurrenceResponse"); states.Add(state);
+            var state = await Json(response, HttpStatusCode.Created); Wire.Validate(state, "OccurrenceResponseU1"); states.Add(state);
         }
         var first = await C1Response(await C1Complete(client, states[0]));
         var last = await C1Response(await C1Complete(client, states[2]));
         string path = "/api/v1/occurrences?definitionId=" + definitionId + "&pageSize=1";
         var all = await Json(await client.GetAsync(path + "&placementStatus=unplanned"));
-        Wire.Validate(all, "OccurrencePage"); Assert.Equal(ids[0], Wire.Str(all["items"]![0]!, "id")); Assert.Equal("completed", Wire.Str(all["items"]![0]!, "completionStatus"));
+        Wire.Validate(all, "OccurrencePageU1"); Assert.Equal(ids[0], Wire.Str(all["items"]![0]!, "id")); Assert.Equal("completed", Wire.Str(all["items"]![0]!, "completionStatus"));
         var work = await Json(await client.GetAsync(path + "&placementStatus=unplanned&completionStatus=incomplete"));
         Assert.Single(work["items"]!.AsArray()); Assert.Equal(ids[1], Wire.Str(work["items"]![0]!, "id")); Assert.Null(work["nextCursor"]);
         var completed = await Json(await client.GetAsync(path + "&completionStatus=completed"));
@@ -175,6 +175,7 @@ public partial class ApiIntegrationTests
         using var client = await Login(); var original = await Occurrence(client, await Definition(client));
         string owner = Wire.Str(await Json(await client.GetAsync("/api/v1/me")), "userId");
         var legacy = original.DeepClone().AsObject(); legacy["occurrence"]!.AsObject().Remove("completionStatus"); legacy["occurrence"]!.AsObject().Remove("completion");
+        legacy["occurrence"] = LegacyTestWire.Occurrence(legacy["occurrence"]!);
         legacy["occurrence"]!["serverVersion"] = "legacy_occurrence_v1"; Wire.Validate(legacy, "OccurrenceResponseLegacyD1");
         string legacyBody = legacy.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\r\n";
         var oldError = new JsonObject { ["type"] = "about:blank", ["title"] = "historical stale entity", ["status"] = 412, ["detail"] = "Old operation result.", ["instance"] = C1Path(original), ["code"] = "staleEntity", ["correlationId"] = "old-result-correlation", ["currentServerVersion"] = "legacy_occurrence_v1", ["currentOccurrence"] = legacy["occurrence"]!.DeepClone() };
@@ -198,7 +199,7 @@ public partial class ApiIntegrationTests
         using (var headScope = C1Fixture.App.Services.CreateScope()) syncHead = (await headScope.ServiceProvider.GetRequiredService<VibeDb>().SyncStreams.AsNoTracking().SingleAsync(s => s.UserId == owner)).LastSequence;
         var success = await Send(client, HttpMethod.Put, C1Path(original), successPayload, oldEtag);
         Assert.Equal(HttpStatusCode.OK, success.StatusCode); Assert.Equal(legacyBody, await success.Content.ReadAsStringAsync()); Assert.Equal("\"legacy_occurrence_v1\"", success.Headers.ETag!.ToString()); Assert.Equal(C1Path(original), success.Headers.Location!.ToString()); Assert.Equal("true", success.Headers.GetValues("Idempotency-Replayed").Single());
-        Wire.Validate(Wire.Obj(await success.Content.ReadAsStringAsync()), "OccurrenceMutationResponse");
+        Wire.Validate(Wire.Obj(await success.Content.ReadAsStringAsync()), "OccurrenceMutationResponseU1");
         var error = await Send(client, HttpMethod.Put, C1Path(original), errorPayload, oldEtag);
         Assert.Equal(HttpStatusCode.PreconditionFailed, error.StatusCode); Assert.Equal(oldErrorBody, await error.Content.ReadAsStringAsync()); Assert.Equal("true", error.Headers.GetValues("Idempotency-Replayed").Single());
         Assert.Equal(counters, await C1Counters(client, completed)); Assert.Equal(C1FactId(completed), C1FactId(await C1Refresh(client, completed)));

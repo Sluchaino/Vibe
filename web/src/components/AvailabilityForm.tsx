@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { AvailabilityRules, DayOfWeek, ExceptionWindow } from '../api/types'
 import { addDays, isTimezone, localCandidates } from '../lib/time'
 import { Field } from './shared'
+import { hasTimeLimits } from '../lib/availability'
 
 export const weekdays: { value: DayOfWeek; label: string }[] = [
   { value: 'monday', label: 'Пн' }, { value: 'tuesday', label: 'Вт' }, { value: 'wednesday', label: 'Ср' }, { value: 'thursday', label: 'Чт' }, { value: 'friday', label: 'Пт' }, { value: 'saturday', label: 'Сб' }, { value: 'sunday', label: 'Вс' },
@@ -10,16 +11,24 @@ export function OffsetSelect({ date, time, timezone, value, onChange, label }: {
   const candidates = useMemo(() => {
     try { return localCandidates(`${date}T${time}:00`, timezone) } catch { return [] }
   }, [date, time, timezone])
-  return <Field label={label} hint={candidates.length === 0 ? 'Это время не существует или дата/зона ещё не выбраны.' : candidates.length > 1 ? 'Время встречается дважды. Выберите нужный вариант явно.' : 'Выберите смещение для указанной даты и зоны.'}><select required value={value} onChange={event => onChange(event.target.value)}><option value="">Выберите UTC offset</option>{candidates.map(candidate => <option key={candidate.utcOffset} value={candidate.utcOffset}>{candidate.utcOffset} · {candidate.instant.slice(11, 16)} UTC</option>)}</select></Field>
+  if (candidates.length === 1) return null
+  if (!candidates.length) return <p className="field-warning" role="alert">{label}: это время не существует либо дата и часовой пояс ещё не заполнены. Выберите действительное время.</p>
+  return <Field label={label} hint="Время встречается дважды при переводе часов. Выберите нужное вхождение явно."><select required value={value} onChange={event => onChange(event.target.value)}><option value="">Выберите вхождение времени</option>{candidates.map((candidate, index) => <option key={candidate.utcOffset} value={candidate.utcOffset}>{index === 0 ? 'Первое' : 'Второе'} вхождение · UTC{candidate.utcOffset}</option>)}</select></Field>
 }
 export function AvailabilityForm({ value, onChange }: { value: AvailabilityRules; onChange: (value: AvailabilityRules) => void }) {
+  const [expanded, setExpanded] = useState(() => hasTimeLimits(value))
+  function revealInvalid(target: EventTarget, container: HTMLDetailsElement) {
+    let element = target instanceof HTMLElement ? target : null
+    while (element && element !== container) { if (element instanceof HTMLDetailsElement) element.open = true; element = element.parentElement }
+    container.open = true; setExpanded(true)
+  }
   function changeWindow(index: number, patch: Partial<AvailabilityRules['windows'][number]>) { onChange({ ...value, windows: value.windows.map((window, i) => i === index ? { ...window, ...patch } : window) }) }
   function changeException(index: number, patch: Partial<AvailabilityRules['dateExceptions'][number]>) { onChange({ ...value, dateExceptions: value.dateExceptions.map((exception, i) => i === index ? { ...exception, ...patch } : exception) }) }
   function exceptionWindow(exceptionIndex: number, windowIndex: number, patch: Partial<ExceptionWindow>) {
     const exception = value.dateExceptions[exceptionIndex]!
     changeException(exceptionIndex, { windows: exception.windows.map((window, i) => i === windowIndex ? { ...window, ...patch } : window) })
   }
-  return <fieldset className="availability"><legend>Когда можно запланировать</legend>
+  return <details className="availability-options" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)} onInvalidCapture={event => revealInvalid(event.target, event.currentTarget)}><summary>{hasTimeLimits(value) ? 'Когда можно выполнять · заданы ограничения' : 'Ограничить допустимое время'}</summary><p className="muted">Например, по будням с 09:00 до 18:00. Без окон и исключений подходит любое время. Сворачивание этого раздела сохраняет заданные ограничения.</p><fieldset className="availability"><legend>Когда можно выполнять</legend>
     <Field label="Часовой пояс разрешённых окон" hint="Эта зона сохраняется в условиях выполнения и не меняется вместе с зоной календаря."><input required value={value.timezone} onChange={event => onChange({ ...value, timezone: event.target.value, dateExceptions: value.dateExceptions.map(exception => ({ ...exception, windows: exception.windows.map(window => ({ ...window, startUtcOffset: '', endUtcOffset: '' })) })) })} placeholder="Europe/Moscow" list="timezones" /></Field>
     {!isTimezone(value.timezone) && <p className="field-warning">Укажите действительную IANA-зону.</p>}
     <p className="muted">Без обычных окон доступны любые дни и время, кроме заданных исключений. Ночное окно относится к дню своего начала.</p>
@@ -32,5 +41,5 @@ export function AvailabilityForm({ value, onChange }: { value: AvailabilityRules
       </fieldset>)}
       <button type="button" onClick={() => onChange({ ...value, dateExceptions: [...value.dateExceptions, { localDate: '', windows: [] }] })}>Добавить исключение по дате</button>
     </details>
-  </fieldset>
+  </fieldset></details>
 }

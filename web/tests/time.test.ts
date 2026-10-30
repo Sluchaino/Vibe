@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { addDays, calendarRange, elapsedEnd, intersects, localCandidates, localParts, monday, selectedInstant, startOfLocalDate } from '../src/lib/time.ts'
+import { addDays, calendarRange, completionTimeLabel, elapsedEnd, instantLabel, intersects, localCandidates, localParts, monday, resolveLocalTime, selectedInstant, startOfLocalDate } from '../src/lib/time.ts'
+import { hasTimeLimits, resolvedAvailability } from '../src/lib/availability.ts'
+import { initialPlacementStart } from '../src/lib/placement-draft.ts'
+import { occurrenceFixture } from './completion-fixture.ts'
 
 test('Berlin spring gap rejects the nonexistent minute without shifting it', () => {
   assert.deepEqual(localCandidates('2026-03-29T02:30:00', 'Europe/Berlin'), [])
@@ -48,4 +51,42 @@ test('night blocks intersect both local days, while touching excluded upper boun
   assert.equal(intersects(first.to, '2026-10-12T23:00:00Z', first.from, first.to), false)
   assert.equal(addDays('2026-12-31', 1), '2027-01-01')
   assert.throws(() => addDays('2026-02-30', 1))
+})
+test('ordinary local times resolve their only offset automatically; folds require an explicit valid choice', () => {
+  assert.deepEqual(resolveLocalTime('2026-10-16T09:00:00', 'Europe/Moscow'), { utcOffset: '+03:00', instant: '2026-10-16T06:00:00Z' })
+  assert.equal(resolveLocalTime('2026-10-16T09:00:00', 'Europe/Berlin', '+01:00').utcOffset, '+02:00')
+  assert.throws(() => resolveLocalTime('2026-10-25T02:30:00', 'Europe/Berlin'), /дважды/)
+  assert.throws(() => resolveLocalTime('2026-10-25T02:30:00', 'Europe/Berlin', '+03:00'), /дважды/)
+  assert.equal(resolveLocalTime('2026-10-25T02:30:00', 'Europe/Berlin', '+01:00').instant, '2026-10-25T01:30:00Z')
+  assert.throws(() => resolveLocalTime('2026-03-29T02:30:00', 'Europe/Berlin'), /не существует/)
+})
+test('exception requests resolve ordinary boundaries and retain explicit DST/night choices without changing saved input', () => {
+  const rules = { timezone: 'Europe/Berlin', windows: [], dateExceptions: [{ localDate: '2026-10-24', windows: [{ startLocalTime: '23:00', endLocalTime: '02:30', endDayOffset: 1 as const, startUtcOffset: '', endUtcOffset: '+01:00' }] }] }
+  const result = resolvedAvailability(rules)
+  assert.equal(result.dateExceptions[0]?.windows[0]?.startUtcOffset, '+02:00')
+  assert.equal(result.dateExceptions[0]?.windows[0]?.endUtcOffset, '+01:00')
+  assert.equal(rules.dateExceptions[0]?.windows[0]?.startUtcOffset, '')
+  assert.throws(() => resolvedAvailability({ ...rules, dateExceptions: [{ ...rules.dateExceptions[0]!, windows: [{ ...rules.dateExceptions[0]!.windows[0]!, endUtcOffset: '' }] }] }), /дважды/)
+  assert.throws(() => resolvedAvailability({ ...rules, dateExceptions: [{ localDate: '2026-03-29', windows: [{ startLocalTime: '02:30', endLocalTime: '04:00', endDayOffset: 0, startUtcOffset: '', endUtcOffset: '' }] }] }), /не существует/)
+  assert.equal(hasTimeLimits(rules), true)
+  assert.equal(hasTimeLimits({ timezone: rules.timezone, windows: [], dateExceptions: [] }), false)
+  assert.throws(() => resolvedAvailability({ timezone: rules.timezone, windows: [], dateExceptions: [{ localDate: '', windows: [] }] }), /дату каждого исключения/)
+  assert.throws(() => resolvedAvailability({ timezone: rules.timezone, windows: [{ daysOfWeek: ['monday'], startLocalTime: '', endLocalTime: '18:00', endDayOffset: 0 }], dateExceptions: [] }), /каждого разрешённого окна/)
+})
+test('placement uses an explicit intent or actual block; an unknown start never invents 09:00', () => {
+  const unplanned = occurrenceFixture(null, false)
+  assert.equal(initialPlacementStart(unplanned, 'Europe/Moscow'), '')
+  unplanned.timeIntent = { timezone: 'Europe/Moscow', startLocalTime: '14:15', endLocalTime: null, endDayOffset: 0, startDisambiguation: null, endDisambiguation: null }
+  assert.equal(initialPlacementStart(unplanned, 'Europe/Moscow'), `${unplanned.logicalDate}T14:15`)
+  const planned = occurrenceFixture()
+  planned.logicalDate = '2026-12-30'
+  assert.equal(initialPlacementStart(planned, 'Europe/Berlin'), '2026-10-25T02:30')
+})
+test('ordinary time labels omit GMT/offset but still honor the chosen IANA zone', () => {
+  const instant = '2026-10-16T06:15:30.123Z'
+  for (const label of [instantLabel(instant, 'Europe/Moscow'), completionTimeLabel(instant, 'Europe/Moscow')]) {
+    assert.doesNotMatch(label, /GMT|UTC|\+03/)
+    assert.match(label, /09:15/)
+  }
+  assert.match(instantLabel(instant, 'UTC'), /06:15/)
 })

@@ -4,7 +4,7 @@ import type { Command } from './operations.ts'
 export type CompletionIntent = { action: 'complete'; completionId: null } | { action: 'reopen'; completionId: string }
 export type CompletionFilter = 'all' | CompletionStatus
 export function hasCurrentCompletion(occurrence: TaskOccurrence) {
-  return (occurrence.completionStatus === 'incomplete' && occurrence.completion === null && occurrence.remainingWorkMinutes > 0)
+  return (occurrence.completionStatus === 'incomplete' && occurrence.completion === null && (occurrence.remainingWorkMinutes === null || occurrence.remainingWorkMinutes > 0))
     || (occurrence.completionStatus === 'completed' && occurrence.completion != null && occurrence.completion.revokedAt === null && occurrence.completion.occurrenceId === occurrence.id && occurrence.remainingWorkMinutes === 0)
 }
 export function isCompleted(occurrence: TaskOccurrence) { return occurrence.completionStatus === 'completed' || occurrence.completion != null }

@@ -1,18 +1,25 @@
 import type { PendingCommand } from '../lib/operations.ts'
 import type { ProblemDetails } from '../api/types.ts'
 
-export interface DraftRecord { userId: string; draftId: string; key: string; value: unknown; base: unknown; revision: number; updatedAt: number }
+export interface DraftRecord {
+  userId: string; draftId: string; key: string; value: unknown; base: unknown; revision: number; updatedAt: number
+  category?: 'manual' | 'emergency' | 'continuation'; editRevision?: number; sourceDraftId?: string
+  expectedRevision?: number | null; saved?: { value: unknown; base: unknown }; pendingOpId?: string
+}
 export type PendingStatus = 'unconfirmed' | 'acknowledgedRefresh' | 'conflict' | 'rejected' | 'resetReview'
 export interface PendingRecord {
   userId: string; opId: string; command: PendingCommand; query: string; ifMatch: string | null
   draftId: string; draftRevision: number; streamId: string; status: PendingStatus; pendingRevision: number
   submittedDraft: DraftRecord
+  recoveryDraftId?: string; recoveryRevision?: number
   problem?: ProblemDetails; previousStatus?: PendingStatus; authorizedStream?: string
 }
 export type PendingPatch = Partial<Pick<PendingRecord, 'status' | 'problem' | 'previousStatus' | 'authorizedStream'>>
 export interface StoragePort {
   drafts(userId: string): Promise<DraftRecord[]>
   saveDraft(draft: DraftRecord): Promise<void>
+  saveDraftCas(draft: DraftRecord, expectedRevision: number | null): Promise<boolean>
+  deleteDraftCas(userId: string, draftId: string, revision: number): Promise<boolean>
   getPending(userId: string): Promise<PendingRecord | null>
   reserve(pending: PendingRecord, draft: DraftRecord): Promise<boolean>
   transition(expected: PendingRecord, patch: PendingPatch | null, cleanDraft?: boolean): Promise<boolean>
@@ -20,6 +27,11 @@ export interface StoragePort {
   close(): void
 }
 export class StorageError extends Error {}
+export function draftCategory(draft: DraftRecord) { return draft.category ?? (draft.key.startsWith('calendar-create:') ? 'continuation' : 'manual') }
+export function draftMatches(old: DraftRecord | undefined, expected: number | null) { return expected === null ? old === undefined : old !== undefined && old.revision === expected }
+export function recoveryDraft(pending: PendingRecord, draft: DraftRecord): DraftRecord {
+  return { ...structuredClone(draft), category: 'emergency', sourceDraftId: draft.draftId, draftId: pending.recoveryDraftId!, revision: pending.recoveryRevision!, expectedRevision: Object.hasOwn(draft, 'expectedRevision') ? draft.expectedRevision : draft.revision, pendingOpId: pending.opId }
+}
 export function samePending(actual: PendingRecord | undefined, expected: PendingRecord) {
   return !!actual && actual.userId === expected.userId && actual.opId === expected.opId && actual.pendingRevision === expected.pendingRevision && actual.status === expected.status
 }
@@ -66,12 +78,23 @@ export function openStorage(databaseName = 'Vibe.S1', factory?: IDBFactory): Pro
           const drafts = tx.objectStore('drafts')
           get(drafts.get([draft.userId, draft.draftId]), (old: DraftRecord | undefined) => { if (!old || old.revision < draft.revision) drafts.put(structuredClone(draft)); done(undefined) })
         }),
+        saveDraftCas: (draft, expectedRevision) => transaction(['drafts'], 'readwrite', (tx, done) => {
+          const drafts = tx.objectStore('drafts')
+          get(drafts.get([draft.userId, draft.draftId]), (old: DraftRecord | undefined) => { if (!draftMatches(old, expectedRevision)) { done(false); return }; drafts.put(structuredClone(draft)); done(true) })
+        }),
+        deleteDraftCas: (userId, draftId, revision) => transaction(['drafts'], 'readwrite', (tx, done) => {
+          const drafts = tx.objectStore('drafts')
+          get(drafts.get([userId, draftId]), (old: DraftRecord | undefined) => { if (!old || old.revision !== revision) { done(false); return }; drafts.delete([userId, draftId]); done(true) })
+        }),
         reserve: (pending, draft) => transaction(['pending', 'drafts'], 'readwrite', (tx, done) => {
           const slots = tx.objectStore('pending'), drafts = tx.objectStore('drafts')
           get(slots.get(pending.userId), old => {
             if (old) { done(false); return }
             slots.add(structuredClone(pending))
-            get(drafts.get([draft.userId, draft.draftId]), (saved: DraftRecord | undefined) => { if (!saved || saved.revision <= draft.revision) drafts.put(structuredClone(draft)); done(true) })
+            // The immutable submission has its own recovery row. Never overwrite
+            // a saved manual draft (or another tab's edits) while reserving.
+            if (pending.recoveryDraftId) drafts.put(recoveryDraft(pending, draft))
+            done(true)
           })
         }),
         transition: (expected, patch, cleanDraft = false) => transaction(['pending', 'drafts'], 'readwrite', (tx, done) => {
@@ -80,7 +103,7 @@ export function openStorage(databaseName = 'Vibe.S1', factory?: IDBFactory): Pro
             if (!samePending(actual, expected)) { done(false); return }
             if (patch) slots.put({ ...actual, ...structuredClone(patch), pendingRevision: expected.pendingRevision + 1 })
             else slots.delete(expected.userId)
-            if (cleanDraft) get(drafts.get([expected.userId, expected.draftId]), (draft: DraftRecord | undefined) => { if (draft?.revision === expected.draftRevision) drafts.delete([expected.userId, expected.draftId]) })
+            if (cleanDraft && expected.recoveryDraftId) get(drafts.get([expected.userId, expected.recoveryDraftId]), (draft: DraftRecord | undefined) => { if (draft?.category === 'emergency' && draft.pendingOpId === expected.opId && draft.revision === expected.recoveryRevision) drafts.delete([expected.userId, expected.recoveryDraftId!]) })
             done(true)
           })
         }),

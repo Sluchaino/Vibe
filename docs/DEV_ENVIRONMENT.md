@@ -8,7 +8,7 @@
 | Node.js | Доступен 24.19.0 из bundled runtime Codex |
 | pnpm | Доступен 11.25.0 из bundled runtime Codex; отдельный npm в PATH не найден |
 | Docker | CLI/engine 29.7.2; Docker Desktop запущен, проектный контейнер проверен |
-| PostgreSQL | 18.6 в контейнере, loopback 54329, рабочая vibe и отдельная vibe_d1_tests; app role vibe без superuser/create privileges. Host psql не устанавливался |
+| PostgreSQL | 18.6 в контейнере, loopback 15432 (с 19.10; прежние 54329 и 55432 попадали в резерв Windows после перезагрузки), рабочая vibe и отдельная vibe_d1_tests; app role vibe без superuser/create privileges. Host psql не устанавливался |
 | Backend packages | EF Core/Identity/Design/MVC.Testing 10.0.12, Npgsql EF 10.0.3, xUnit 2.9.3, runner 4.0.1, Test.Sdk 18.10.1; сборки и PostgreSQL-тесты выполнялись |
 | Android | По сообщению владельца Kotlin/Android-среда отсутствуют; полный поиск SDK не проводился. Для начала Backend/Web они не нужны |
 | Git | Исполняемый файл доступен; папка пока не Git-репозиторий. Коммиты не разрешены |

@@ -296,11 +296,17 @@ namespace Vibe.Api.Data.Migrations
                     b.Property<Guid>("DefinitionId")
                         .HasColumnType("uuid");
 
-                    b.Property<DateOnly>("LogicalDate")
+                    b.Property<DateOnly?>("LogicalDate")
                         .HasColumnType("date");
 
                     b.Property<Guid>("PlaceId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("PlacementIssue")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ResolvedTimingJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("SnapshotJson")
                         .IsRequired()
@@ -309,6 +315,9 @@ namespace Vibe.Api.Data.Migrations
                     b.Property<string>("SourceDefinitionVersion")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("TimeIntentJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("Version")
                         .IsRequired()
@@ -393,6 +402,95 @@ namespace Vibe.Api.Data.Migrations
                     b.ToTable("UserPlanState", (string)null);
                 });
 
+            modelBuilder.Entity("Vibe.Api.Data.RecurrenceRuleRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("AnchorDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("DaysMask")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("DefinitionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("GeneratedThrough")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("GenerationStartDate")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("IntervalDays")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("weekly");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("TimeIntentJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Timezone")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("UserId", "Id");
+
+                    b.HasIndex("UserId", "DefinitionId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "Enabled", "Id");
+
+                    b.ToTable("RecurrenceRules", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_RecurrenceRule_Dates", "(\"EndDate\" IS NULL OR \"EndDate\" >= \"StartDate\") AND \"GenerationStartDate\" >= \"StartDate\" AND (\"GeneratedThrough\" IS NULL OR (\"GeneratedThrough\" >= \"GenerationStartDate\" AND (\"EndDate\" IS NULL OR \"GeneratedThrough\" <= \"EndDate\")))");
+
+                            t.HasCheckConstraint("CK_RecurrenceRule_Days", "(\"Pattern\" = 'weekly' AND \"DaysMask\" BETWEEN 1 AND 127 AND \"IntervalDays\" IS NULL AND \"AnchorDate\" IS NULL) OR (\"Pattern\" = 'interval' AND \"DaysMask\" = 0 AND \"IntervalDays\" > 0 AND \"IntervalDays\" IS NOT NULL AND \"AnchorDate\" IS NOT NULL AND \"StartDate\" = \"AnchorDate\")");
+                        });
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.RecurrenceSlotRow", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RuleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("SlotDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("OccurrenceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("UserId", "RuleId", "SlotDate");
+
+                    b.HasIndex("UserId", "OccurrenceId")
+                        .IsUnique();
+
+                    b.ToTable("RecurrenceSlots", (string)null);
+                });
+
             modelBuilder.Entity("Vibe.Api.Data.SettingsRow", b =>
                 {
                     b.Property<string>("UserId")
@@ -432,6 +530,11 @@ namespace Vibe.Api.Data.Migrations
                     b.Property<Guid>("OpId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Ordinal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("PlanStateJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -446,11 +549,13 @@ namespace Vibe.Api.Data.Migrations
                     b.HasIndex("UserId", "StreamId", "ChangeId")
                         .IsUnique();
 
-                    b.HasIndex("UserId", "StreamId", "OpId")
+                    b.HasIndex("UserId", "StreamId", "OpId", "Ordinal")
                         .IsUnique();
 
                     b.ToTable("SyncChanges", null, t =>
                         {
+                            t.HasCheckConstraint("CK_SyncChange_Ordinal", "\"Ordinal\" >= 0");
+
                             t.HasCheckConstraint("CK_SyncChange_PositiveSequence", "\"Sequence\" > 0");
                         });
                 });
@@ -737,6 +842,30 @@ namespace Vibe.Api.Data.Migrations
                     b.HasOne("Vibe.Api.Data.VibeUser", null)
                         .WithOne()
                         .HasForeignKey("Vibe.Api.Data.PlanRow", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.RecurrenceRuleRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.DefinitionRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "DefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vibe.Api.Data.RecurrenceSlotRow", b =>
+                {
+                    b.HasOne("Vibe.Api.Data.OccurrenceRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "OccurrenceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vibe.Api.Data.RecurrenceRuleRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "RuleId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

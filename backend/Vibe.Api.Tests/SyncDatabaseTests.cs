@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Vibe.Api.Tests;
 
-public sealed class SyncDatabaseTests(PostgresFixture fixture) : IClassFixture<PostgresFixture>
+public sealed partial class SyncDatabaseTests(PostgresFixture fixture) : IClassFixture<PostgresFixture>
 {
     static void Safe(NpgsqlConnectionStringBuilder connection, string schema)
     {
@@ -23,7 +23,8 @@ public sealed class SyncDatabaseTests(PostgresFixture fixture) : IClassFixture<P
         var result = new Dictionary<string, string>();
         foreach (string table in tables)
         {
-            await using var command = new NpgsqlCommand("SELECT md5(COALESCE(string_agg(to_jsonb(r)::text, E'\\n' ORDER BY to_jsonb(r)::text), '')) FROM \"" + table.Replace("\"", "\"\"") + "\" r", db);
+            const string row = "(to_jsonb(r)-'TimeIntentJson'-'ResolvedTimingJson'-'PlacementIssue'-'Pattern'-'IntervalDays'-'AnchorDate')";
+            await using var command = new NpgsqlCommand("SELECT md5(COALESCE(string_agg(" + row + "::text, E'\\n' ORDER BY " + row + "::text), '')) FROM \"" + table.Replace("\"", "\"\"") + "\" r", db);
             result[table] = (string)(await command.ExecuteScalarAsync())!;
         }
         return result;
@@ -50,8 +51,8 @@ public sealed class SyncDatabaseTests(PostgresFixture fixture) : IClassFixture<P
                 old.UserLogins.Add(new IdentityUserLogin<string> { UserId = owner, LoginProvider = "test", ProviderKey = "key" });
                 old.UserTokens.Add(new IdentityUserToken<string> { UserId = owner, LoginProvider = "test", Name = "test", Value = "non-secret-fixture" });
                 var instant = new DateTime(2026, 10, 15, 10, 0, 0, DateTimeKind.Utc);
-                var occurrence = await old.Occurrences.SingleAsync(o => o.UserId == owner);
-                string context = new JsonObject { ["logicalDate"] = "2026-10-14", ["sourceDefinitionVersion"] = occurrence.SourceDefinitionVersion, ["constraintsSnapshot"] = JsonNode.Parse(occurrence.SnapshotJson) }.ToJsonString();
+                string oldSnapshot = await old.Database.SqlQuery<string>($"SELECT \"SnapshotJson\"::text AS \"Value\" FROM \"TaskOccurrences\" WHERE \"UserId\"={owner}").SingleAsync();
+                string context = new JsonObject { ["logicalDate"] = "2026-10-14", ["sourceDefinitionVersion"] = "definition_legacy", ["constraintsSnapshot"] = JsonNode.Parse(oldSnapshot) }.ToJsonString();
                 old.Completions.AddRange(new CompletionRow { UserId = owner, Id = Guid.NewGuid(), OccurrenceId = seed.Occurrence, CompletedAtUtc = instant, RevokedAtUtc = instant.AddMinutes(-1), OccurrenceSnapshotJson = context, Version = "revoked_legacy" },
                     new CompletionRow { UserId = owner, Id = Guid.NewGuid(), OccurrenceId = seed.Occurrence, CompletedAtUtc = instant, OccurrenceSnapshotJson = context, Version = "active_legacy" });
                 old.Operations.Add(new OperationRow { UserId = owner, OpId = Guid.NewGuid(), Fingerprint = "failed-legacy", Status = 409, Body = "{ \"legacyError\": true }\n", ETag = "\"old_legacy\"" });

@@ -66,6 +66,11 @@ public static class Wire
         Unsupported(node);
         if (!Matches(node, Schemas[schemaName]!)) Bad();
     }
+    public static void ValidateEither(JsonNode node, string current, string legacy)
+    {
+        Unsupported(node);
+        if (Matches(node, Schemas[current]!) == Matches(node, Schemas[legacy]!)) Bad();
+    }
     public static void NormalizeIntegers(JsonNode node)
     {
         if (node is JsonObject obj)

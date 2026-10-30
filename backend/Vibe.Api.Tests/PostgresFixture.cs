@@ -42,6 +42,7 @@ public sealed class TestApp(string connection, TestClock clock, IReadOnlyDiction
             ["Testing:SeedUsers:2:UserName"] = "lockout-user",
             ["Testing:SeedUsers:2:Password"] = PostgresFixture.Password,
             ["Auth:SessionHours"] = "24", ["Auth:MaxFailedAccessAttempts"] = "5", ["Auth:LockoutMinutes"] = "15"
+            ,["Recurrence:PollIntervalSeconds"] = "3600"
             });
             if (overrides is not null) config.AddInMemoryCollection(overrides);
         });

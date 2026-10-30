@@ -6,6 +6,8 @@ import { emptyProjection, replaceItems, validateProjection, type Projection } fr
 
 export interface SyncState { projection: Projection | null; status: 'loading' | 'ready' | 'stale' | 'stopped'; error: Error | null; busy: boolean }
 type Reader = (path: string) => Promise<unknown>
+export const DELTA_LIMITS = { pages: 100, changes: 5000, bytes: 16 * 1024 * 1024, milliseconds: 30_000 }
+export class DeltaLimitError extends Error { constructor() { super('Обновление превысило безопасный размер или время ожидания. Показана последняя целиком подтверждённая редакция. Повторите обновление; ввод и отправка сохранены.') } }
 // One serialized reader/publisher per tab/account. Cursor is never persisted.
 export class SyncCoordinator {
   private state: SyncState = { projection: null, status: 'loading', error: null, busy: false }
@@ -19,8 +21,11 @@ export class SyncCoordinator {
   private current: () => boolean
   readonly userId: string
   private reader: Reader
-  constructor(userId: string, reader: Reader = read, current?: () => boolean) {
+  private limits: typeof DELTA_LIMITS
+  private clock: () => number
+  constructor(userId: string, reader: Reader = read, current?: () => boolean, options: { limits?: Partial<typeof DELTA_LIMITS>; clock?: () => number } = {}) {
     this.userId = userId; this.reader = reader
+    this.limits = { ...DELTA_LIMITS, ...options.limits }; this.clock = options.clock ?? (() => performance.now())
     const epoch = identityState.epoch
     this.current = current ?? (() => identityState.userId === userId && identityState.epoch === epoch)
   }
@@ -40,7 +45,7 @@ export class SyncCoordinator {
       if (!first) { first = page; staging = emptyProjection(page.planState, page.asOfCursor, page.streamId, generation) }
       if (page.streamId !== first.streamId || page.snapshotId !== first.snapshotId || page.expiresAt !== first.expiresAt || page.asOfCursor !== first.asOfCursor || page.planState.planningInputRevision !== first.planState.planningInputRevision || page.planState.scheduleVersion !== first.planState.scheduleVersion) throw new SyncSchemaError()
       for (const item of page.items) {
-        const rank = { settings: 0, category: 1, definition: 2, occurrence: 3 }[item.kind]
+        const rank = { settings: 0, category: 1, definition: 2, occurrence: 3, recurrence: 4 }[item.kind]
         const key = `${rank}:${item.kind === 'settings' ? '' : item.value.id.toLowerCase()}`
         if (keys.has(key) || key < lastKey) throw new SyncSchemaError()
         keys.add(key); lastKey = key; count++; bytes += new TextEncoder().encode(JSON.stringify(item)).length
@@ -54,20 +59,31 @@ export class SyncCoordinator {
     this.publish({ projection: staging!, status: 'ready', error: null, busy: true })
   }
   private async pass() {
-    let more = true
+    let more = true, pages = 0, count = 0, bytes = 0
+    const started = this.clock()
+    let staging = this.state.projection!
     const cursors = new Set<string>(), changes = new Set<string>()
     while (more) {
-      const previous = this.state.projection!
-      const page = changesPage(await this.request(`/sync/changes?cursor=${encodeURIComponent(previous.cursor)}&pageSize=50`))
-      if (page.streamId !== previous.streamId) throw new ApiError({ code: 'syncResetRequired', status: 410 } as never)
-      if (page.hasMore && (page.nextCursor === previous.cursor || cursors.has(page.nextCursor) || !page.changes.length)) throw new SyncSchemaError()
+      const remaining = this.limits.milliseconds - (this.clock() - started)
+      if (remaining < 0 || pages >= this.limits.pages) throw new DeltaLimitError()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let raw: unknown
+      try { raw = await Promise.race([this.request(`/sync/changes?cursor=${encodeURIComponent(staging.cursor)}&pageSize=50`), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DeltaLimitError()), Math.max(1, remaining)) })]) } finally { clearTimeout(timer) }
+      if (this.clock() - started > this.limits.milliseconds) throw new DeltaLimitError()
+      const page = changesPage(raw)
+      if (page.streamId !== staging.streamId) throw new ApiError({ code: 'syncResetRequired', status: 410 } as never)
+      if (page.hasMore && (page.nextCursor === staging.cursor || cursors.has(page.nextCursor) || !page.changes.length)) throw new SyncSchemaError()
       for (const change of page.changes) { if (changes.has(change.id)) throw new SyncSchemaError(); changes.add(change.id) }
+      pages++; count += page.changes.length
+      for (const change of page.changes) bytes += new TextEncoder().encode(JSON.stringify(change)).length
+      if (count > this.limits.changes || bytes > this.limits.bytes) throw new DeltaLimitError()
       cursors.add(page.nextCursor)
-      const next = replaceItems(previous, page.changes.map(change => change.item), page.changes.at(-1)?.planState ?? previous.planState, page.nextCursor)
-      validateProjection(next)
-      this.publish({ projection: next, status: 'ready', error: null, busy: true })
+      staging = replaceItems(staging, page.changes.map(change => change.item), page.changes.at(-1)?.planState ?? staging.planState, page.nextCursor)
       more = page.hasMore
     }
+    validateProjection(staging)
+    if (this.clock() - started > this.limits.milliseconds) throw new DeltaLimitError()
+    this.publish({ projection: staging, status: 'ready', error: null, busy: true })
   }
   // Every call is queued. An ACK call therefore starts its own *new* tail after
   // any already-running bounded pass, even when that pass began before the ACK.
@@ -79,7 +95,7 @@ export class SyncCoordinator {
       try {
         try { if (!this.state.projection || this.state.status === 'loading') await this.bootstrap(); await this.pass() }
         catch (error) {
-          if (error instanceof ApiError && (error.problem.code === 'invalidCursor' || error.problem.status === 410)) {
+          if (error instanceof DeltaLimitError || (error instanceof ApiError && (error.problem.code === 'invalidCursor' || error.problem.status === 410))) {
             this.publish({ ...this.state, status: 'loading' }); await this.bootstrap(); await this.pass()
           } else throw error
         }

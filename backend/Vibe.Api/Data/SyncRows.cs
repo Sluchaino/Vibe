@@ -16,6 +16,7 @@ public sealed class SyncChangeRow
     public long Sequence { get; set; }
     public Guid ChangeId { get; set; } = Guid.NewGuid();
     public Guid OpId { get; set; }
+    public int Ordinal { get; set; }
     public string ItemJson { get; set; } = "{}";
     public string PlanStateJson { get; set; } = "{}";
     public DateTime RecordedAtUtc { get; set; }
@@ -47,10 +48,15 @@ internal static class SyncModel
         b.Entity<SyncStreamRow>().HasKey(x => x.UserId);
         b.Entity<SyncStreamRow>().HasAlternateKey(x => new { x.UserId, x.StreamId });
         b.Entity<SyncStreamRow>().HasOne<VibeUser>().WithOne().HasForeignKey<SyncStreamRow>(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
-        b.Entity<SyncChangeRow>().ToTable("SyncChanges", t => t.HasCheckConstraint("CK_SyncChange_PositiveSequence", "\"Sequence\" > 0"));
+        b.Entity<SyncChangeRow>().ToTable("SyncChanges", t =>
+        {
+            t.HasCheckConstraint("CK_SyncChange_PositiveSequence", "\"Sequence\" > 0");
+            t.HasCheckConstraint("CK_SyncChange_Ordinal", "\"Ordinal\" >= 0");
+        });
         b.Entity<SyncChangeRow>().HasKey(x => new { x.UserId, x.StreamId, x.Sequence });
         b.Entity<SyncChangeRow>().HasIndex(x => new { x.UserId, x.StreamId, x.ChangeId }).IsUnique();
-        b.Entity<SyncChangeRow>().HasIndex(x => new { x.UserId, x.StreamId, x.OpId }).IsUnique();
+        b.Entity<SyncChangeRow>().HasIndex(x => new { x.UserId, x.StreamId, x.OpId, x.Ordinal }).IsUnique();
+        b.Entity<SyncChangeRow>().Property(x => x.Ordinal).HasDefaultValue(0);
         b.Entity<SyncChangeRow>().Property(x => x.ItemJson).HasColumnType("jsonb");
         b.Entity<SyncChangeRow>().Property(x => x.PlanStateJson).HasColumnType("jsonb");
         b.Entity<SyncChangeRow>().HasOne<SyncStreamRow>().WithMany().HasForeignKey(x => new { x.UserId, x.StreamId }).HasPrincipalKey(x => new { x.UserId, x.StreamId }).OnDelete(DeleteBehavior.Restrict);

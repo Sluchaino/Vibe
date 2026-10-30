@@ -5,7 +5,7 @@ services:
     image: postgres:18-bookworm@sha256:afc7e2d441324c0388fa80c3d24f733b4194a4eb7f47dd8ee2b08eb1a24a647c
     restart: unless-stopped
     ports:
-      - "127.0.0.1:54329:5432"
+      - "127.0.0.1:15432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_DB: vibe

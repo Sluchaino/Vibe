@@ -1,18 +1,19 @@
 import type { CalendarResponse, TaskOccurrence } from '../api/types'
 import { effectiveFixed } from '../lib/operations'
 import { calendarMinutes, isCompleted } from '../lib/completion'
+import { placementIssueLabels } from '../lib/task-timing'
 import { addDays, dateLabel, instantLabel, intersects, startOfLocalDate } from '../lib/time'
 
-export function Calendar({ data, dates, timezone, view, onOpen }: { data: CalendarResponse | null; dates: string[]; timezone: string; view: 'day' | 'week'; onOpen: (occurrence: TaskOccurrence) => void }) {
+export function Calendar({ data, dates, timezone, view, onOpen, dateOnly = [], onPlace }: { data: CalendarResponse | null; dates: string[]; timezone: string; view: 'day' | 'week'; onOpen: (occurrence: TaskOccurrence) => void; dateOnly?: TaskOccurrence[]; onPlace?: (occurrence: TaskOccurrence) => void }) {
   return <div className={`calendar calendar--${view}`} tabIndex={view === 'week' ? 0 : undefined} aria-label={view === 'day' ? 'Календарь на день' : 'Календарь на неделю'}>{dates.map(date => {
     const from = startOfLocalDate(date, timezone)
     const to = startOfLocalDate(addDays(date, 1), timezone)
     const blocks = (data?.blocks ?? []).filter(block => intersects(block.startInstant, block.endInstant, from, to)).sort((a, b) => a.startInstant.localeCompare(b.startInstant))
     const hours = (Date.parse(to) - Date.parse(from)) / 3_600_000
-    return <section className="calendar-day" key={date} aria-label={dateLabel(date)}><div className="calendar-day__heading"><h3>{dateLabel(date, true)}</h3>{hours !== 24 && <small>{hours} ч · перевод часов</small>}</div>{blocks.length === 0 && <p className="calendar-empty">Нет запланированных выполнений</p>}{blocks.map(block => {
+    return <section className="calendar-day" key={date} aria-label={dateLabel(date)}><div className="calendar-day__heading"><h3>{dateLabel(date, true)}</h3>{hours !== 24 && <small>{hours} ч · перевод часов</small>}</div><div className="calendar-day__items" tabIndex={0} aria-label={`Задачи на ${dateLabel(date)}`}>{dateOnly.filter(item => item.logicalDate === date && !item.calendarBlock).map(occurrence => <article className="date-only-event" key={occurrence.id}><strong>{data?.definitions.find(definition => definition.id === occurrence.definitionId)?.title ?? 'Выполнение'}</strong><p>Без времени · время не занято</p>{occurrence.timeIntent && <p>Выбранные часы: {occurrence.timeIntent.startLocalTime ?? "без начала"} — {occurrence.timeIntent.endLocalTime ?? "без конца"}{occurrence.timeIntent.endDayOffset > 0 && ` · конец через ${occurrence.timeIntent.endDayOffset} дн.`} · {occurrence.timeIntent.timezone}</p>}{occurrence.placementIssue && <p className="notice">{placementIssueLabels[occurrence.placementIssue]}</p>}<p>{isCompleted(occurrence) ? 'Выполнено' : 'Не выполнено'}</p><div className="actions"><button type="button" onClick={() => onOpen(occurrence)}>{isCompleted(occurrence) ? 'Просмотреть отметку' : 'Открыть выполнение'}</button>{!isCompleted(occurrence) && occurrence.constraintsSnapshot.durationPolicy && onPlace && <button type="button" onClick={() => onPlace(occurrence)}>Выбрать время</button>}</div></article>)}{blocks.length === 0 && <p className="calendar-empty">Нет блоков, занимающих время</p>}{blocks.map(block => {
       const occurrence = data?.occurrences.find(item => item.id === block.occurrenceId)
       const definition = data?.definitions.find(item => item.id === occurrence?.definitionId)
       return <button type="button" className={`calendar-event ${occurrence && isCompleted(occurrence) ? 'calendar-event--done' : ''}`} key={block.id} onClick={() => occurrence && onOpen(occurrence)}><span className="event-time">{instantLabel(block.startInstant, timezone)}<br />— {instantLabel(block.endInstant, timezone)}</span><strong>{definition?.title ?? 'Выполнение'}</strong><span>{calendarMinutes(block)} мин · {occurrence && effectiveFixed(occurrence) ? 'закреплено' : 'без фиксации'}</span>{occurrence && <span>{isCompleted(occurrence) ? 'Выполнено · время остаётся занятым' : 'Не выполнено'}</span>}{occurrence && occurrence.logicalDate !== date && <span>Метка выполнения: {occurrence.logicalDate}</span>}{block.startInstant < from && <span>Началось раньше этого дня</span>}{block.endInstant > to && <span>Продолжится на следующий день</span>}</button>
-    })}</section>
+    })}</div></section>
   })}</div>
 }
